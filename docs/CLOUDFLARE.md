@@ -25,12 +25,15 @@ Open the local URL printed by Wrangler. The Worker serves the web app, `/api/hea
 
 The workflow at `.github/workflows/deploy-cloudflare.yml` deploys on every push to `main` and can also be run manually from the repository's Actions tab.
 
-1. Create a Cloudflare API token with Account `Workers Scripts: Edit` and `Account Settings: Read` permissions, scoped to the account that will own the Worker.
-2. In the GitHub repository, open **Settings > Secrets and variables > Actions** and add repository secrets named `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-3. Commit and push the project to the repository's `main` branch. The Actions workflow installs Wrangler, builds `public/` into `dist/`, and deploys the Worker and Durable Object migration.
-4. Check **Actions** for a successful `Deploy to Cloudflare` run. The deploy log contains the `workers.dev` URL; verify its `/api/health` endpoint before connecting the game.
+The workflow deploys on pushes to `main`. For the first deployment, complete these steps in order:
 
-Do not put the API token in the repository, workflow YAML, or chat. The workflow intentionally uses repository secrets.
+1. Cloudflareにログインし、[API Tokens](https://dash.cloudflare.com/profile/api-tokens)からカスタムトークンを作成します。権限はAccountの`Workers Scripts: Edit`と`Account Settings: Read`にし、対象アカウントを選択します。
+2. トークン作成後に表示される値をコピーします。トークンは再表示できないため、安全な場所に控えてください。リポジトリやチャットには貼り付けないでください。
+3. GitHubの[Actions Secrets設定](https://github.com/su-chanpo/suzu-game-fourcard/settings/secrets/actions)を開き、**New repository secret**を2件作成します。`CLOUDFLARE_API_TOKEN`には手順2のトークン、`CLOUDFLARE_ACCOUNT_ID`にはCloudflareダッシュボードで確認できるAccount IDを設定します。
+4. [Actions](https://github.com/su-chanpo/suzu-game-fourcard/actions)を開き、`Deploy to Cloudflare`の実行結果を確認します。push直後の実行がSecrets登録前に失敗または停止していた場合は、Secrets登録後に **Deploy to Cloudflare > Run workflow > main > Run workflow** で再実行します。
+5. 実行が成功したらログに表示される`workers.dev` URLを開き、`https://<Workerのホスト名>/api/health`が`"ok":true`を返すことを確認します。ゲームのオンライン画面には、`https://<Workerのホスト名>`を入力します。
+
+GitHub ActionsはNode.js 20とWranglerを実行環境内に用意するため、デプロイだけなら手元のPCにNode.jsをインストールする必要はありません。
 
 Durable Object SQLite storage is provisioned by the `v1` migration in `wrangler.toml`. The first deployment creates the `GameHub` class. Do not rename the class or remove its migration after deployment without planning a Durable Object migration.
 
