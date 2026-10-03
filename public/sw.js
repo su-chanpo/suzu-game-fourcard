@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fourcard-shell-v2';
+const CACHE_NAME = 'fourcard-shell-v3';
 const APP_FILES = ['./', './index.html', './styles.css', './online.css', './app.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (event) => {
