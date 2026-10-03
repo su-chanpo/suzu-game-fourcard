@@ -965,16 +965,12 @@ $$('[data-view]').forEach((button) => button.addEventListener('click', () => {
   showView(button.dataset.view);
   if (button.dataset.view === 'online') {
     connectOnline();
+    if (button.dataset.onlinePanel) showOnlinePanel(button.dataset.onlinePanel);
   }
 }));
 $('#choose-create-room').addEventListener('click', () => showOnlinePanel('host'));
 $('#choose-join-room').addEventListener('click', () => showOnlinePanel('join'));
 $$('[data-online-back]').forEach((button) => button.addEventListener('click', () => showOnlinePanel('choices')));
-$$('[data-online-entry]').forEach((button) => button.addEventListener('click', () => {
-  showView('online');
-  connectOnline();
-  showOnlinePanel(button.dataset.onlineEntry);
-}));
 $$('[data-mode]').forEach((button) => button.addEventListener('click', () => beginSetup(button.dataset.mode)));
 $$('[data-period]').forEach((button) => button.addEventListener('click', () => { rankingPeriod = button.dataset.period; renderRankings(); }));
 playerCountInput.addEventListener('change', renderLocalNameInputs);
