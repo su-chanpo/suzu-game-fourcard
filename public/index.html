@@ -10,6 +10,7 @@
     <title>フォーカード | Fourcard</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="online.css" />
+    <script src="qrcode.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -61,6 +62,7 @@
           <div class="online-lobby hidden" id="online-lobby">
             <div class="lobby-code"><span>このルームの合言葉</span><strong id="lobby-passphrase">-----</strong><button class="secondary-button" id="copy-passphrase" type="button">コピー</button></div>
             <div><strong id="online-room-label">待機中</strong><p id="online-room-status"></p></div>
+            <div class="lobby-invite"><img id="lobby-qr-code" alt="このルームへの招待QRコード" /><div><strong>リンクで参加</strong><p>QRコードを読み取るか、招待リンクを共有してください。</p><button class="secondary-button" id="share-room-link" type="button">リンクを共有</button></div></div>
             <fieldset class="lobby-rule-settings" id="lobby-rule-settings"><legend>対戦ルール</legend><label class="field-label" for="turn-time-limit">1ターンの制限時間</label><select class="light-select" id="turn-time-limit"><option value="0">制限なし</option><option value="30">30秒</option><option value="60" selected>60秒</option><option value="90">90秒</option></select><label class="field-label" for="fallback-difficulty">切断時のCPUの強さ</label><select class="light-select" id="fallback-difficulty"><option value="easy">EASY</option><option value="normal" selected>NORMAL</option><option value="hard">HARD</option><option value="expert">EXPERT</option></select><p>時間切れのターンも、選んだ強さのCPUが代わりに操作します。</p></fieldset>
             <div class="online-lobby-actions"><button class="primary-button" id="start-room" type="button" disabled>対戦開始</button><button class="plain-link" id="leave-room" type="button">退出</button></div>
           </div>

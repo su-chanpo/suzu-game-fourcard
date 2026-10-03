@@ -100,6 +100,8 @@ let reconnectTimer = null;
 let intentionalDisconnect = false;
 let onlineStartedAt = 0;
 let onlineRoomHost = false;
+let pendingInvitePassphrase = new URLSearchParams(location.search).get('room')?.trim().toUpperCase() || '';
+if (!/^[A-HJ-NP-Z2-9]{5}$/.test(pendingInvitePassphrase)) pendingInvitePassphrase = '';
 let bgmContext = null;
 let bgmNodes = [];
 
@@ -800,6 +802,14 @@ function handleOnlineMessage(raw) {
     $('#create-room').disabled = false;
     $('#join-room-form button').disabled = false;
     $('#cancel-match').disabled = false;
+    if (pendingInvitePassphrase) {
+      $('#join-passphrase').value = pendingInvitePassphrase;
+      sendOnlineMessage({ type: 'room.join', passphrase: pendingInvitePassphrase, name: data.profile.name });
+      pendingInvitePassphrase = '';
+      const inviteUrl = new URL(location.href);
+      inviteUrl.searchParams.delete('room');
+      history.replaceState(null, '', inviteUrl);
+    }
   } else if (message.type === 'room.created') {
     $('#matchmaking-status').classList.add('hidden');
     onlineRoomHost = true;
@@ -855,6 +865,13 @@ function updateOnlineLobby(roomId, players, maxPlayers, hostId, passphrase, sett
   $('#online-lobby').dataset.hostId = hostId || '';
   $('#online-lobby').dataset.roomId = roomId || '';
   $('#lobby-passphrase').textContent = passphrase || roomId || '-----';
+  const inviteUrl = new URL(location.href);
+  inviteUrl.searchParams.set('room', passphrase || roomId || '');
+  inviteUrl.hash = '';
+  const qrCode = qrcode(0, 'M');
+  qrCode.addData(inviteUrl.toString());
+  qrCode.make();
+  $('#lobby-qr-code').src = qrCode.createDataURL(4, 4);
   $('#online-room-status').textContent = `${players.map((player) => player.name).join('、')}　${players.length} / ${maxPlayers} 人${players.length >= maxPlayers ? '。満員です。' : '。参加者を待っています。'}`;
   $('#turn-time-limit').value = String(settings.turnTimeSeconds ?? 60);
   $('#fallback-difficulty').value = settings.cpuDifficulty || 'normal';
@@ -1054,6 +1071,26 @@ $('#copy-passphrase').addEventListener('click', async () => {
     showToast('合言葉を画面から確認してください');
   }
 });
+$('#share-room-link').addEventListener('click', async () => {
+  const inviteUrl = new URL(location.href);
+  inviteUrl.searchParams.set('room', $('#lobby-passphrase').textContent);
+  inviteUrl.hash = '';
+  const shareData = { title: 'フォーカード対戦への招待', text: 'このリンクから対戦に参加できます。', url: inviteUrl.toString() };
+  if (navigator.share) {
+    try {
+      await navigator.share(shareData);
+      return;
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(shareData.url);
+    showToast('招待リンクをコピーしました');
+  } catch {
+    showToast('招待リンクを共有できませんでした');
+  }
+});
 
 function sendRoomSettings() {
   if (!onlineRoomHost) return;
@@ -1076,4 +1113,8 @@ if (data.settings.notifications && 'Notification' in window && Notification.perm
   new Notification('フォーカード', { body: '今日のデイリーボーナスを受け取れます。' });
 }
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
-if (!data.tutorialComplete) openTutorial();
+if (pendingInvitePassphrase) {
+  showView('online');
+  showOnlinePanel('join');
+  connectOnline();
+} else if (!data.tutorialComplete) openTutorial();

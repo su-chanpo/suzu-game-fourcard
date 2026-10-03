@@ -6,3 +6,4 @@ await mkdir(new URL('../dist/', import.meta.url), { recursive: true });
 for (const file of publicFiles) {
   await cp(new URL(`../public/${file}`, import.meta.url), new URL(`../dist/${file}`, import.meta.url));
 }
+await cp(new URL('../node_modules/qrcode-generator/dist/qrcode.js', import.meta.url), new URL('../dist/qrcode.js', import.meta.url));
