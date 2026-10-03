@@ -229,7 +229,10 @@ function startGame() {
 
 function cardMarkup(card, back = false) {
   if (back) return '<div class="playing-card card-back" aria-label="裏向きのカード"></div>';
-  return `<div class="playing-card ${card.color}" aria-label="${card.rank}${card.suit}"><span class="card-corner">${card.rank}<br>${card.suit}</span><span class="card-suit">${card.suit}</span><span class="card-corner card-corner-bottom">${card.rank}<br>${card.suit}</span></div>`;
+  const rank = escapeHtml(card.rank);
+  const suit = escapeHtml(card.suit);
+  const color = card.color === 'red-suit' ? 'red-suit' : 'black-suit';
+  return `<div class="playing-card ${color}" aria-label="${rank}${suit}"><span class="card-corner">${rank}<br>${suit}</span><span class="card-suit">${suit}</span><span class="card-corner card-corner-bottom">${rank}<br>${suit}</span></div>`;
 }
 
 function renderGame() {
