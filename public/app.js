@@ -927,7 +927,6 @@ function handleOnlineMessage(raw) {
     $('#matchmaking-status').classList.add('hidden');
     $('#online-lobby').classList.add('hidden');
     showOnlinePanel('choices');
-    showToast('対戦相手が見つかりました');
   } else if (message.type === 'room.joined') {
     $('#matchmaking-status').classList.add('hidden');
     onlineRoomHost = message.hostId === data.onlineSession.playerId;
