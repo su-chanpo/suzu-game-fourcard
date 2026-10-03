@@ -25,10 +25,10 @@ Wranglerが表示するローカルURLを開いてください。WorkerはWebア
 
 `.github/workflows/deploy-cloudflare.yml`のGitHub Actionsワークフローは、`main`ブランチへのpushごとにデプロイします。GitHubのActions画面から手動で実行することもできます。初回デプロイ時は、次の手順を順番に行ってください。
 
-1. [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)を開き、カスタムトークンを作成します。権限にはAccountの`Workers Scripts: Edit`と`Account Settings: Read`を指定し、対象のCloudflareアカウントを選択します。
+1. [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)を開き、カスタムトークンを作成します。権限にはAccountの`Workers Scripts: Edit`と`Account Settings: Read`を指定し、利用するCloudflareアカウントを1つだけ選択します。
 2. 作成後に一度だけ表示されるトークンをコピーし、安全な場所に控えます。トークンをリポジトリやチャットに貼り付けないでください。
-3. GitHubの[Actions Secrets設定](https://github.com/su-chanpo/suzu-game-fourcard/settings/secrets/actions)を開き、**New repository secret**から次の2つを登録します。`CLOUDFLARE_API_TOKEN`には手順2のトークン、`CLOUDFLARE_ACCOUNT_ID`にはCloudflareダッシュボードに表示されるAccount IDを設定してください。
-4. [GitHub Actions](https://github.com/su-chanpo/suzu-game-fourcard/actions)を開き、`Deploy to Cloudflare`の実行結果を確認します。Secretsの登録前にpushした実行が失敗または停止していた場合は、Secretsを登録したあと、**Deploy to Cloudflare > Run workflow > main > Run workflow**を選んで再実行してください。
+3. GitHubの[Actions Secrets設定](https://github.com/su-chanpo/suzu-game-fourcard/settings/secrets/actions)を開き、**New repository secret**から`CLOUDFLARE_API_TOKEN`を1件登録し、手順2のトークンを設定します。Account IDはWorkflowがCloudflare APIから自動取得します。
+4. [GitHub Actions](https://github.com/su-chanpo/suzu-game-fourcard/actions)を開き、`Deploy to Cloudflare`の実行結果を確認します。Secretsの登録前に開始した実行が失敗した場合は、**Deploy to Cloudflare > Run workflow > main > Run workflow**を選んで再実行してください。
 5. 実行が成功したら、ログに表示される`workers.dev`のURLを開きます。`https://<Workerのホスト名>/api/health`が`"ok":true`を返すことを確認してください。ゲームのオンライン画面には`https://<Workerのホスト名>`を入力します。
 
 GitHub Actionsの実行環境にはNode.js 20とWranglerが用意されるため、GitHub経由でデプロイするだけなら、手元のPCにNode.jsをインストールする必要はありません。

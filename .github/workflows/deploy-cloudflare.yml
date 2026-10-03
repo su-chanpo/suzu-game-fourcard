@@ -28,8 +28,23 @@ jobs:
       - name: Install Wrangler
         run: npm install --no-package-lock
 
+      - name: Resolve Cloudflare account
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          response=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts?per_page=50")
+          account_count=$(jq '.result | length' <<< "$response")
+          if [[ "$account_count" != "1" ]] || [[ "$(jq -r '.success' <<< "$response")" != "true" ]]; then
+            echo "The API token must be scoped to exactly one Cloudflare account." >&2
+            exit 1
+          fi
+          echo "CLOUDFLARE_ACCOUNT_ID=$(jq -r '.result[0].id' <<< "$response")" >> "$GITHUB_ENV"
+
       - name: Build and deploy
         run: npm run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
