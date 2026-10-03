@@ -229,7 +229,10 @@ function startGame() {
 
 function cardMarkup(card, back = false) {
   if (back) return '<div class="playing-card card-back" aria-label="裏向きのカード"></div>';
-  return `<div class="playing-card ${card.color}" aria-label="${card.rank}${card.suit}"><span class="card-corner">${card.rank}<br>${card.suit}</span><span class="card-suit">${card.suit}</span><span class="card-corner card-corner-bottom">${card.rank}<br>${card.suit}</span></div>`;
+  const rank = escapeHtml(card.rank);
+  const suit = escapeHtml(card.suit);
+  const color = card.color === 'red-suit' ? 'red-suit' : 'black-suit';
+  return `<div class="playing-card ${color}" aria-label="${rank}${suit}"><span class="card-corner">${rank}<br>${suit}</span><span class="card-suit">${suit}</span><span class="card-corner card-corner-bottom">${rank}<br>${suit}</span></div>`;
 }
 
 function renderGame() {
@@ -273,11 +276,83 @@ function renderTurnTimer() {
 
 function renderOpponents() {
   const viewerIndex = game.mode === 'local' ? game.current : game.mode === 'online' ? game.meIndex : 0;
-  $('#opponents').innerHTML = game.players.filter((_, index) => index !== viewerIndex).map((player) => {
-    const score = game.complete ? `<span class="opponent-score">${player.score} pt</span>` : '';
-    const cards = player.cards.map(({ card, revealed }, index) => `<div class="opponent-card-slot"><span class="opponent-slot-number">0${index + 1}</span>${cardMarkup(card, !card || (!revealed && !game.complete))}<span class="opponent-slot-state">${revealed || game.complete ? 'OPEN' : 'HIDDEN'}</span></div>`).join('');
-    return `<div class="opponent"><div class="opponent-heading"><strong>${escapeHtml(player.name)}</strong>${score}</div><div class="opponent-card-row" aria-label="${escapeHtml(player.name)}の手札">${cards}</div></div>`;
-  }).join('');
+  const opponents = $('#opponents');
+  opponents.replaceChildren();
+  game.players.forEach((player, index) => {
+    if (index === viewerIndex) return;
+    const current = game.mode === 'online' && index === game.current;
+    const opponent = document.createElement('div');
+    opponent.className = `opponent${current ? ' is-current' : ''}`;
+
+    const playerHeader = document.createElement('div');
+    playerHeader.className = 'opponent-player';
+    const avatar = document.createElement('span');
+    avatar.className = `opponent-avatar${player.isCPU ? ' is-cpu' : ''}`;
+    avatar.setAttribute('aria-hidden', 'true');
+    avatar.textContent = player.isCPU ? '♟' : player.name.trim().slice(0, 1) || '?';
+    const info = document.createElement('div');
+    info.className = 'opponent-info';
+    const heading = document.createElement('div');
+    heading.className = 'opponent-heading';
+    const name = document.createElement('strong');
+    name.textContent = player.name;
+    heading.append(name);
+    if (game.complete) {
+      const score = document.createElement('span');
+      score.className = 'opponent-score';
+      score.textContent = `${player.score} pt`;
+      heading.append(score);
+    }
+    info.append(heading);
+    if (game.mode === 'online') {
+      const presence = document.createElement('span');
+      const status = player.isCPU ? 'CPU操作' : player.connected === false ? '再接続中' : 'オンライン';
+      presence.className = `opponent-presence ${player.isCPU ? 'is-cpu' : player.connected === false ? 'is-disconnected' : 'is-online'}`;
+      const indicator = document.createElement('i');
+      indicator.setAttribute('aria-hidden', 'true');
+      presence.append(indicator, document.createTextNode(`${status}${current ? ' · 手番' : ''}`));
+      info.append(presence);
+    }
+    playerHeader.append(avatar, info);
+
+    const cardRow = document.createElement('div');
+    cardRow.className = 'opponent-card-row';
+    cardRow.setAttribute('aria-label', `${player.name}の手札`);
+    player.cards.forEach(({ card, revealed }, cardIndex) => {
+      const slot = document.createElement('div');
+      slot.className = 'opponent-card-slot';
+      const number = document.createElement('span');
+      number.className = 'opponent-slot-number';
+      number.textContent = `0${cardIndex + 1}`;
+      const cardElement = document.createElement('div');
+      cardElement.classList.add('playing-card');
+      const isBack = !card || (!revealed && !game.complete);
+      if (isBack) {
+        cardElement.classList.add('card-back');
+        cardElement.setAttribute('aria-label', '裏向きのカード');
+      } else {
+        cardElement.classList.add(card.color === 'red-suit' ? 'red-suit' : 'black-suit');
+        cardElement.setAttribute('aria-label', `${card.rank}${card.suit}`);
+        const addCorner = (bottom = false) => {
+          const corner = document.createElement('span');
+          corner.className = `card-corner${bottom ? ' card-corner-bottom' : ''}`;
+          corner.append(document.createTextNode(String(card.rank)), document.createElement('br'), document.createTextNode(String(card.suit)));
+          return corner;
+        };
+        const suit = document.createElement('span');
+        suit.className = 'card-suit';
+        suit.textContent = card.suit;
+        cardElement.append(addCorner(), suit, addCorner(true));
+      }
+      const state = document.createElement('span');
+      state.className = 'opponent-slot-state';
+      state.textContent = revealed || game.complete ? 'OPEN' : 'HIDDEN';
+      slot.append(number, cardElement, state);
+      cardRow.append(slot);
+    });
+    opponent.append(playerHeader, cardRow);
+    opponents.append(opponent);
+  });
 }
 
 function renderHand() {
@@ -831,7 +906,6 @@ function handleOnlineMessage(raw) {
     $('#cancel-match').disabled = false;
     if (pendingInvitePassphrase) {
       $('#join-passphrase').value = pendingInvitePassphrase;
-      sendOnlineMessage({ type: 'room.join', passphrase: pendingInvitePassphrase, name: data.profile.name });
       pendingInvitePassphrase = '';
       const inviteUrl = new URL(location.href);
       inviteUrl.searchParams.delete('room');
@@ -875,6 +949,12 @@ function handleOnlineMessage(raw) {
   } else if (message.type === 'game.state') {
     applyOnlineState(message.state);
   } else if (message.type === 'connection.lost' || message.type === 'connection.cpu') {
+    const player = game?.mode === 'online' ? game.players.find((entry) => entry.id === message.playerId) : null;
+    if (player) {
+      player.connected = false;
+      if (message.type === 'connection.cpu') player.isCPU = true;
+      renderOpponents();
+    }
     showToast(message.message || 'プレイヤーの接続状態が変わりました');
   } else if (message.type === 'error') {
     busy = false;
