@@ -1,5 +1,5 @@
-const CACHE_NAME = 'fourcard-shell-v3';
-const APP_FILES = ['./', './index.html', './styles.css', './online.css', './app.js', './manifest.webmanifest', './icon.svg'];
+const CACHE_NAME = 'fourcard-shell-v4';
+const APP_FILES = ['./', './index.html', './styles.css', './online.css', './qrcode.js', './app.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_FILES)));
