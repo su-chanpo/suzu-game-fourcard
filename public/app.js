@@ -126,10 +126,12 @@ function saveData() {
   }
 }
 
-function showView(view, updateUrl = true) {
+function showView(view, updateUrl = true, scrollToTop = true) {
   const path = PAGE_PATHS[view];
   if (updateUrl && path && location.pathname !== path) history.pushState(null, '', `${path}${location.search}`);
   const ids = ['home-screen', 'play-screen', 'setup-screen', 'online-screen', 'rankings-screen', 'stats-screen', 'skins-screen', 'settings-screen', 'tutorial-screen', 'game-screen', 'result-screen', 'handoff-screen'];
+  const currentView = ids.find((id) => !$(`#${id}`).classList.contains('hidden'));
+  const viewChanged = currentView !== `${view}-screen`;
   ids.forEach((id) => $(`#${id}`).classList.toggle('hidden', id !== `${view}-screen`));
   document.body.classList.toggle('in-game', view === 'game' || view === 'handoff');
   if (view === 'home') renderHome();
@@ -137,7 +139,7 @@ function showView(view, updateUrl = true) {
   if (view === 'stats') renderStats();
   if (view === 'skins') renderSkins();
   if (view === 'settings') renderSettings();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (scrollToTop && viewChanged) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function createDeck() {
