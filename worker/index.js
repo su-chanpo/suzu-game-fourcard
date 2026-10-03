@@ -240,6 +240,10 @@ export class GameHub {
     if (!room || room.status !== 'waiting') throw new Error('開始できるルームがありません。');
     if (room.hostId !== attachment.playerId) throw new Error('ルーム作成者だけが対戦を開始できます。');
     if (room.players.length < 2) throw new Error('対戦には2人以上必要です。');
+    while (room.players.length < room.maxPlayers) {
+      const cpuNumber = room.players.filter((player) => player.isCPU).length + 1;
+      room.players.push({ id: crypto.randomUUID(), name: `CPU ${cpuNumber}`, isCPU: true, connected: false, turns: 0 });
+    }
     this.startGame(room);
     await this.ctx.storage.put('rooms', rooms);
     await this.scheduleAlarm(rooms);
