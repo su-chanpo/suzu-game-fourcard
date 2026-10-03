@@ -979,7 +979,21 @@ function finishOnlineGame() {
 function setConnectionStatus(connected, message) {
   const status = $('#connection-status');
   status.classList.toggle('is-connected', connected);
+  status.disabled = !connected;
   status.lastChild.textContent = ` ${message}`;
+}
+
+function disconnectOnline() {
+  const activeSocket = socket;
+  if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN || !window.confirm('ゲームサーバーから切断しますか？')) return;
+  intentionalDisconnect = true;
+  clearTimeout(reconnectTimer);
+  if (game?.mode === 'online') returnToHome();
+  else {
+    sendOnlineMessage({ type: 'room.leave' });
+    showView('home');
+  }
+  activeSocket.close(1000, 'Disconnected by user');
 }
 
 function disableOnlineActions() {
@@ -1013,6 +1027,7 @@ $$('[data-view]').forEach((button) => button.addEventListener('click', (event) =
     if (button.dataset.onlinePanel) showOnlinePanel(button.dataset.onlinePanel);
   }
 }));
+$('#connection-status').addEventListener('click', disconnectOnline);
 window.addEventListener('popstate', () => {
   const view = Object.keys(PAGE_PATHS).find((page) => PAGE_PATHS[page] === location.pathname) || 'home';
   showView(view, false);
