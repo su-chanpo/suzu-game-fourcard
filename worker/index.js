@@ -47,6 +47,7 @@ export class GameHub {
       if (message.type === 'session.join') return await this.joinSession(ws, message);
       if (!attachment.playerId) throw new Error('先にセッションへ接続してください。');
       if (message.type === 'match.quick') return await this.quickMatch(ws, attachment, message);
+      if (message.type === 'match.cancel') return await this.cancelMatch(ws, attachment);
       if (message.type === 'room.create') return await this.createRoom(ws, attachment, message);
       if (message.type === 'room.join') return await this.joinRoom(ws, attachment, message);
       if (message.type === 'room.start') return await this.startRoom(ws, attachment);
@@ -124,9 +125,11 @@ export class GameHub {
     }
     this.send(ws, { type: 'session.ready', playerId, resumeToken: token });
     if (room) {
-      this.send(ws, { type: room.status === 'waiting' ? 'room.joined' : 'match.found', roomId: room.id, hostId: room.hostId, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
+      this.send(ws, { type: room.status === 'waiting' ? 'room.joined' : 'match.found', roomId: room.id, hostId: room.hostId, matchType: room.matchType, passphrase: room.hostId === playerId ? room.passphrase : '', maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
       if (room.status === 'playing') this.sendStateTo(ws, room, playerId);
       else this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: room.players.map(({ id, name: playerName }) => ({ id, name: playerName })) });
+    } else if ((await this.ctx.storage.get('queue') || []).some((entry) => entry.playerId === playerId)) {
+      this.send(ws, { type: 'match.queued' });
     }
   }
 
@@ -135,27 +138,20 @@ export class GameHub {
     if (this.findPlayerRoom(rooms, attachment.playerId)) throw new Error('すでにルームまたは対戦に参加しています。');
     let queue = await this.ctx.storage.get('queue') || [];
     queue = queue.filter((entry) => entry.playerId !== attachment.playerId && this.socketFor(entry.playerId) && !this.findPlayerRoom(rooms, entry.playerId));
-    const opponent = queue.shift();
-    if (!opponent) {
-      queue.push({ playerId: attachment.playerId, name: this.cleanName(message.name, 'Player'), queuedAt: Date.now() });
-      await this.ctx.storage.put('queue', queue);
-      return this.send(ws, { type: 'match.queued', position: queue.length });
-    }
-    const room = this.newRoom([
-      { id: opponent.playerId, name: this.cleanName(opponent.name, 'Player'), isCPU: false, connected: true, turns: 0 },
-      { id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, connected: true, turns: 0 },
-    ]);
-    this.startGame(room);
-    rooms[room.id] = room;
-    await this.ctx.storage.put('rooms', rooms);
     await this.ctx.storage.put('queue', queue);
-    for (const player of room.players) {
-      const playerSocket = this.socketFor(player.id);
-      if (!playerSocket) continue;
-      playerSocket.serializeAttachment({ playerId: player.id, roomId: room.id });
-      this.send(playerSocket, { type: 'match.found', roomId: room.id, players: this.publicPlayers(room) });
-      this.sendStateTo(playerSocket, room, player.id);
-    }
+    const room = Object.values(rooms)
+      .filter((entry) => entry.status === 'waiting' && (!entry.matchType || entry.matchType === 'random') && entry.players.length < entry.maxPlayers)
+      .sort((left, right) => left.createdAt - right.createdAt)[0];
+    if (room) return await this.addPlayerToRoom(ws, attachment, rooms, room, message.name);
+    queue.push({ playerId: attachment.playerId, name: this.cleanName(message.name, 'Player'), queuedAt: Date.now() });
+    await this.ctx.storage.put('queue', queue);
+    this.send(ws, { type: 'match.queued', position: queue.length });
+  }
+
+  async cancelMatch(ws, attachment) {
+    const queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId);
+    await this.ctx.storage.put('queue', queue);
+    this.send(ws, { type: 'match.cancelled' });
   }
 
   async createRoom(ws, attachment, message) {
@@ -163,39 +159,72 @@ export class GameHub {
     if (this.findPlayerRoom(rooms, attachment.playerId)) throw new Error('すでにルームまたは対戦に参加しています。');
     const maxPlayers = Number(message.maxPlayers);
     if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 4) throw new Error('プレイヤー人数は2〜4人で指定してください。');
+    const matchType = message.matchType === 'passphrase' ? 'passphrase' : 'random';
+    const passphrase = matchType === 'passphrase' ? this.normalizePassphrase(message.passphrase) : '';
+    if (matchType === 'passphrase' && (passphrase.length < 3 || passphrase.length > 24)) throw new Error('合言葉は3〜24文字で設定してください。');
+    if (matchType === 'passphrase' && Object.values(rooms).some((room) => room.status === 'waiting' && room.passphrase === passphrase)) {
+      throw new Error('同じ合言葉の募集がすでにあります。別の合言葉を設定してください。');
+    }
     const room = this.newRoom([{ id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, connected: true, turns: 0 }]);
     room.maxPlayers = maxPlayers;
     room.hostId = attachment.playerId;
-    const queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId);
+    room.matchType = matchType;
+    room.passphrase = passphrase;
+    let queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId && this.socketFor(entry.playerId) && !this.findPlayerRoom(rooms, entry.playerId));
+    if (matchType === 'random') {
+      while (queue.length && room.players.length < room.maxPlayers) {
+        const waitingPlayer = queue.shift();
+        room.players.push({ id: waitingPlayer.playerId, name: this.cleanName(waitingPlayer.name, 'Player'), isCPU: false, connected: true, turns: 0 });
+      }
+    }
     rooms[room.id] = room;
     await this.ctx.storage.put('rooms', rooms);
     await this.ctx.storage.put('queue', queue);
     ws.serializeAttachment({ ...attachment, roomId: room.id });
-    this.send(ws, { type: 'room.created', roomId: room.id, hostId: room.hostId, players: this.publicPlayers(room), maxPlayers: room.maxPlayers });
+    this.send(ws, { type: 'room.created', roomId: room.id, hostId: room.hostId, matchType, passphrase, players: this.publicPlayers(room), maxPlayers: room.maxPlayers });
+    for (const player of room.players.slice(1)) {
+      const playerSocket = this.socketFor(player.id);
+      if (!playerSocket) continue;
+      playerSocket.serializeAttachment({ playerId: player.id, roomId: room.id });
+      this.send(playerSocket, { type: 'room.joined', roomId: room.id, hostId: room.hostId, matchType, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
+    }
+    if (room.players.length >= room.maxPlayers) {
+      this.startGame(room);
+      await this.ctx.storage.put('rooms', rooms);
+      this.broadcastRoom(room, { type: 'room.started', roomId: room.id, players: this.publicPlayers(room) });
+      this.broadcastState(room);
+    } else if (room.players.length > 1) {
+      this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: this.publicPlayers(room) });
+    }
   }
 
   async joinRoom(ws, attachment, message) {
-    const roomId = typeof message.roomId === 'string' ? message.roomId.trim().toUpperCase() : '';
-    if (!/^[A-HJ-NP-Z2-9]{6}$/.test(roomId)) throw new Error('ルームIDは6文字で入力してください。');
+    const passphrase = this.normalizePassphrase(message.passphrase);
+    if (passphrase.length < 3 || passphrase.length > 24) throw new Error('合言葉は3〜24文字で入力してください。');
     const rooms = await this.ctx.storage.get('rooms') || {};
-    const room = rooms[roomId];
-    if (!room) throw new Error('ルームが見つかりません。');
-    if (room.status !== 'waiting') throw new Error('このルームでは対戦が始まっています。');
-    if (room.players.length >= room.maxPlayers) throw new Error('このルームは満員です。');
+    const room = Object.values(rooms).find((entry) => entry.status === 'waiting' && entry.matchType === 'passphrase' && entry.passphrase === passphrase);
+    if (!room) throw new Error('その合言葉の募集が見つかりません。');
     if (this.findPlayerRoom(rooms, attachment.playerId)) throw new Error('すでにルームまたは対戦に参加しています。');
-    room.players.push({ id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, connected: true, turns: 0 });
+    await this.addPlayerToRoom(ws, attachment, rooms, room, message.name);
+  }
+
+  async addPlayerToRoom(ws, attachment, rooms, room, name) {
+    if (room.status !== 'waiting' || room.players.length >= room.maxPlayers) throw new Error('この募集は満員か、すでに始まっています。');
+    room.players.push({ id: attachment.playerId, name: this.cleanName(name, 'Player'), isCPU: false, connected: true, turns: 0 });
     const queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId);
     await this.ctx.storage.put('queue', queue);
-    ws.serializeAttachment({ ...attachment, roomId });
-    this.broadcastRoom(room, { type: 'room.updated', roomId, players: this.publicPlayers(room) });
+    ws.serializeAttachment({ ...attachment, roomId: room.id });
+    this.send(ws, { type: 'room.joined', roomId: room.id, hostId: room.hostId, matchType: room.matchType, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
     if (room.players.length >= room.maxPlayers) {
       this.startGame(room);
-      this.broadcastRoom(room, { type: 'room.started', roomId, players: this.publicPlayers(room) });
-      this.broadcastState(room);
     } else {
-      this.send(ws, { type: 'room.joined', roomId, hostId: room.hostId, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
+      this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: this.publicPlayers(room) });
     }
     await this.ctx.storage.put('rooms', rooms);
+    if (room.status === 'playing') {
+      this.broadcastRoom(room, { type: 'room.started', roomId: room.id, players: this.publicPlayers(room) });
+      this.broadcastState(room);
+    }
   }
 
   async startRoom(ws, attachment) {
@@ -253,6 +282,13 @@ export class GameHub {
   async leaveRoom(ws, attachment) {
     const rooms = await this.ctx.storage.get('rooms') || {};
     const room = rooms[attachment.roomId];
+    if (!room) {
+      const queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId);
+      await this.ctx.storage.put('queue', queue);
+      ws.serializeAttachment({ ...attachment, roomId: null });
+      this.send(ws, { type: 'match.cancelled' });
+      return;
+    }
     if (room) {
       const playerIndex = room.players.findIndex((entry) => entry.id === attachment.playerId);
       if (playerIndex >= 0 && room.status === 'waiting') {
@@ -413,7 +449,9 @@ export class GameHub {
   broadcastRoom(room, message) {
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment() || {};
-      if (attachment.roomId === room.id || room.players.some((player) => player.id === attachment.playerId)) this.send(ws, { ...message, hostId: room.hostId, maxPlayers: room.maxPlayers });
+      if (attachment.roomId === room.id || room.players.some((player) => player.id === attachment.playerId)) {
+        this.send(ws, { ...message, hostId: room.hostId, matchType: room.matchType, maxPlayers: room.maxPlayers });
+      }
     }
   }
 
@@ -435,6 +473,10 @@ export class GameHub {
 
   cleanName(value, fallback) {
     return typeof value === 'string' ? value.trim().slice(0, 12) || fallback : fallback;
+  }
+
+  normalizePassphrase(value) {
+    return typeof value === 'string' ? value.normalize('NFKC').trim().toLocaleLowerCase('ja') : '';
   }
 
   randomToken() {

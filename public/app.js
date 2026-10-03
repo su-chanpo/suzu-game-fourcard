@@ -766,25 +766,43 @@ function handleOnlineMessage(raw) {
     $('#quick-match').disabled = false;
     $('#create-room').disabled = false;
     $('#join-room-form button').disabled = false;
+    $('#cancel-match').disabled = false;
   } else if (message.type === 'room.created') {
-    $('#room-code').value = message.roomId;
+    $('#matchmaking-status').classList.add('hidden');
+    $('#lobby-passphrase').textContent = message.passphrase ? `合言葉: ${message.passphrase}` : '';
+    $('#lobby-passphrase').classList.toggle('hidden', !message.passphrase);
+    $('#copy-passphrase').classList.toggle('hidden', !message.passphrase);
     onlineRoomHost = true;
-    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId);
-    showToast(`ルーム ${message.roomId} を作成しました`);
+    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.matchType);
+    showToast(message.matchType === 'passphrase' ? '合言葉募集を開始しました' : 'ランダム募集を開始しました');
   } else if (message.type === 'match.queued') {
+    $('#matchmaking-message').textContent = '公開中のホスト募集を待っています…';
+    $('#matchmaking-status').classList.remove('hidden');
+    $('#quick-match').disabled = true;
     showToast('対戦相手を探しています…');
   } else if (message.type === 'match.found') {
+    $('#matchmaking-status').classList.add('hidden');
     $('#online-lobby').classList.add('hidden');
     showToast('対戦相手が見つかりました');
   } else if (message.type === 'room.joined') {
-    onlineRoomHost = false;
-    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId);
-    showToast('ルームに参加しました');
+    $('#matchmaking-status').classList.add('hidden');
+    onlineRoomHost = message.hostId === data.onlineSession.playerId;
+    $('#lobby-passphrase').textContent = onlineRoomHost && message.passphrase ? `合言葉: ${message.passphrase}` : '';
+    $('#lobby-passphrase').classList.toggle('hidden', !onlineRoomHost || !message.passphrase);
+    $('#copy-passphrase').classList.toggle('hidden', !onlineRoomHost || !message.passphrase);
+    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.matchType);
+    showToast(message.matchType === 'random' ? 'ホストの募集に参加しました' : '合言葉で募集に参加しました');
   } else if (message.type === 'room.started') {
     $('#online-lobby').classList.add('hidden');
     showToast('対戦を開始します');
   } else if (message.type === 'room.updated') {
-    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId);
+    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.matchType);
+  } else if (message.type === 'match.cancelled' || message.type === 'room.left') {
+    $('#matchmaking-status').classList.add('hidden');
+    $('#online-lobby').classList.add('hidden');
+    $('#quick-match').disabled = false;
+    $('#lobby-passphrase').classList.add('hidden');
+    $('#copy-passphrase').classList.add('hidden');
   } else if (message.type === 'game.state') {
     applyOnlineState(message.state);
   } else if (message.type === 'connection.lost' || message.type === 'connection.cpu') {
@@ -798,12 +816,13 @@ function handleOnlineMessage(raw) {
   }
 }
 
-function updateOnlineLobby(roomId, players, maxPlayers, hostId) {
+function updateOnlineLobby(roomId, players, maxPlayers, hostId, matchType = 'random') {
   onlineRoomHost = hostId === data.onlineSession.playerId;
   $('#online-lobby').classList.remove('hidden');
-  $('#online-room-label').textContent = `ルーム ${roomId}`;
+  $('#online-room-label').textContent = matchType === 'passphrase' ? '合言葉募集' : 'ランダム募集';
   $('#online-lobby').dataset.hostId = hostId || '';
-  $('#online-room-status').textContent = `${players.length} / ${maxPlayers} 人が参加中${players.length >= 2 ? '。ホストは開始できます。' : '。対戦には2人以上必要です。'}`;
+  $('#online-lobby').dataset.roomId = roomId || '';
+  $('#online-room-status').textContent = `${players.map((player) => player.name).join('、')}　${players.length} / ${maxPlayers} 人${players.length >= 2 ? '。ホストは開始できます。' : '。対戦には2人以上必要です。'}`;
   $('#start-room').classList.toggle('hidden', !onlineRoomHost);
   $('#start-room').disabled = !onlineRoomHost || players.length < 2;
 }
@@ -878,6 +897,7 @@ function disableOnlineActions() {
   $('#quick-match').disabled = true;
   $('#create-room').disabled = true;
   $('#join-room-form button').disabled = true;
+  $('#cancel-match').disabled = true;
 }
 
 function sendOnlineMessage(message) {
@@ -954,23 +974,36 @@ $('#setting-notifications').addEventListener('change', async (event) => {
 $('#export-data').addEventListener('click', exportSaveData);
 $('#import-data').addEventListener('change', (event) => { if (event.target.files[0]) importSaveData(event.target.files[0]); event.target.value = ''; });
 $('#connect-button').addEventListener('click', connectOnline);
-$('#quick-match').addEventListener('click', () => sendOnlineMessage({ type: 'match.quick', name: data.profile.name, maxPlayers: 4 }));
-$('#create-room').addEventListener('click', () => sendOnlineMessage({ type: 'room.create', name: data.profile.name, maxPlayers: Number($('#online-player-count').value) }));
-$('#join-room-form').addEventListener('submit', (event) => { event.preventDefault(); sendOnlineMessage({ type: 'room.join', roomId: $('#room-code').value.trim().toUpperCase(), name: data.profile.name }); });
+$('#quick-match').addEventListener('click', () => sendOnlineMessage({ type: 'match.quick', name: data.profile.name }));
+$('#host-match-type').addEventListener('change', (event) => {
+  const needsPassphrase = event.target.value === 'passphrase';
+  $('#host-passphrase-field').classList.toggle('hidden', !needsPassphrase);
+  $('#host-passphrase').classList.toggle('hidden', !needsPassphrase);
+});
+$('#create-room').addEventListener('click', () => sendOnlineMessage({
+  type: 'room.create',
+  name: data.profile.name,
+  maxPlayers: Number($('#online-player-count').value),
+  matchType: $('#host-match-type').value,
+  passphrase: $('#host-passphrase').value,
+}));
+$('#join-room-form').addEventListener('submit', (event) => { event.preventDefault(); sendOnlineMessage({ type: 'room.join', passphrase: $('#join-passphrase').value, name: data.profile.name }); });
+$('#cancel-match').addEventListener('click', () => sendOnlineMessage({ type: 'match.cancel' }));
 $('#start-room').addEventListener('click', () => sendOnlineMessage({ type: 'room.start' }));
 $('#leave-room').addEventListener('click', () => {
   sendOnlineMessage({ type: 'room.leave' });
   onlineRoomHost = false;
   $('#online-lobby').classList.add('hidden');
+  $('#lobby-passphrase').classList.add('hidden');
+  $('#copy-passphrase').classList.add('hidden');
   showToast('ルームを退出しました');
 });
-$('#copy-room-code').addEventListener('click', async () => {
+$('#copy-passphrase').addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText($('#room-code').value);
-    showToast('ルームIDをコピーしました');
+    await navigator.clipboard.writeText($('#lobby-passphrase').textContent.replace(/^合言葉: /, ''));
+    showToast('合言葉をコピーしました');
   } catch {
-    $('#room-code').select();
-    showToast('ルームIDを選択しました');
+    showToast('合言葉を画面から確認してください');
   }
 });
 
