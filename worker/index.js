@@ -75,11 +75,7 @@ export class GameHub {
     let nextAlarm = Infinity;
     for (const roomId of Object.keys(rooms)) {
       const room = rooms[roomId];
-      if (room.status === 'complete') {
-        if (!room.completedAt || now - room.completedAt >= COMPLETE_ROOM_CLEANUP_MS) delete rooms[roomId];
-        else nextAlarm = Math.min(nextAlarm, room.completedAt + COMPLETE_ROOM_CLEANUP_MS);
-        continue;
-      }
+      if (room.status === 'complete') continue;
       for (const player of room.players) {
         if (!player.connected && !player.isCPU && player.disconnectedAt) {
           const remaining = player.disconnectedAt + RECONNECT_GRACE_MS - now;
@@ -105,6 +101,7 @@ export class GameHub {
         if (room.turnDeadline && !room.players[room.current]?.isCPU) nextAlarm = Math.min(nextAlarm, room.turnDeadline);
       }
     }
+    nextAlarm = Math.min(nextAlarm, this.cleanupCompleteRoom(rooms, now));
     await this.ctx.storage.put('rooms', rooms);
     if (nextAlarm < Infinity) await this.ctx.storage.setAlarm(nextAlarm);
   }
@@ -479,6 +476,17 @@ export class GameHub {
       }
     }
     if (nextAlarm < Infinity) await this.ctx.storage.setAlarm(nextAlarm);
+  }
+
+  cleanupCompleteRoom(rooms, now = Date.now()) {
+    let nextAlarm = Infinity;
+    for (const roomId of Object.keys(rooms)) {
+      const room = rooms[roomId];
+      if (room.status !== 'complete') continue;
+      if (!room.completedAt || now - room.completedAt >= COMPLETE_ROOM_CLEANUP_MS) delete rooms[roomId];
+      else nextAlarm = Math.min(nextAlarm, room.completedAt + COMPLETE_ROOM_CLEANUP_MS);
+    }
+    return nextAlarm;
   }
 
   draw(room) {
