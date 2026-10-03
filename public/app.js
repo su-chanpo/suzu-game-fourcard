@@ -61,9 +61,17 @@ function freshData() {
   };
 }
 
+function getStoredValue(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 function loadData() {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    const stored = JSON.parse(getStoredValue(STORAGE_KEY) || 'null');
     if (!stored || typeof stored !== 'object') return freshData();
     const defaults = freshData();
     return {
@@ -82,8 +90,8 @@ function loadData() {
 }
 
 let data = loadData();
-if (!localStorage.getItem(STORAGE_KEY)) {
-  const previousName = localStorage.getItem('fourcard-player-name');
+if (!getStoredValue(STORAGE_KEY)) {
+  const previousName = getStoredValue('fourcard-player-name');
   if (previousName) data.profile.name = normalizeName(previousName, 'Player 1');
 }
 let game = null;
@@ -1128,7 +1136,7 @@ function sendRoomSettings() {
   });
 }
 
-data.profile.name = normalizeName(data.profile.name || localStorage.getItem('fourcard-player-name'), 'Player 1');
+data.profile.name = normalizeName(data.profile.name || getStoredValue('fourcard-player-name'), 'Player 1');
 playerNameInput.value = data.profile.name;
 applySkins();
 renderHome();
