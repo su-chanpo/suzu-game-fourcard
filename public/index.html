@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#153c37" />
     <meta name="description" content="4枚のカードを交換して、誰よりも低いスコアを目指すフォーカード。" />
+    <base href="/" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <title>フォーカード | Fourcard</title>
@@ -18,11 +19,11 @@
       <header class="topbar">
         <a class="brand" href="#top" aria-label="フォーカード ホーム"><span class="brand-mark" aria-hidden="true">♠</span><span>FOURCARD</span></a>
         <nav class="main-nav" aria-label="メインメニュー">
-          <button type="button" data-view="home">ホーム</button>
-          <button type="button" data-view="rankings">ランキング</button>
-          <button type="button" data-view="stats">戦績</button>
-          <button type="button" data-view="skins">スキン</button>
-          <button type="button" data-view="settings">設定</button>
+          <a href="/" data-view="home">ホーム</a>
+          <a href="/rankings" data-view="rankings">ランキング</a>
+          <a href="/stats" data-view="stats">戦績</a>
+          <a href="/skins" data-view="skins">スキン</a>
+          <a href="/settings" data-view="settings">設定</a>
         </nav>
         <button class="icon-button" id="rules-button" type="button" aria-label="ルールを見る" title="ルール"><span aria-hidden="true">?</span></button>
       </header>

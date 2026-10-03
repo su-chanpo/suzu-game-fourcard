@@ -94,6 +94,7 @@ let cpuTimer = null;
 let turnTimerInterval = null;
 let setupMode = 'cpu';
 let tutorialIndex = 0;
+let tutorialReturnView = 'home';
 let rankingPeriod = 'daily';
 let socket = null;
 let reconnectTimer = null;
@@ -102,6 +103,8 @@ let onlineStartedAt = 0;
 let onlineRoomHost = false;
 let pendingInvitePassphrase = new URLSearchParams(location.search).get('room')?.trim().toUpperCase() || '';
 if (!/^[A-HJ-NP-Z2-9]{5}$/.test(pendingInvitePassphrase)) pendingInvitePassphrase = '';
+const PAGE_PATHS = { home: '/', play: '/play', online: '/online', rankings: '/rankings', stats: '/stats', skins: '/skins', settings: '/settings' };
+const initialPageView = Object.keys(PAGE_PATHS).find((view) => PAGE_PATHS[view] === location.pathname) || 'home';
 let bgmContext = null;
 let bgmNodes = [];
 
@@ -115,7 +118,9 @@ function saveData() {
   }
 }
 
-function showView(view) {
+function showView(view, updateUrl = true) {
+  const path = PAGE_PATHS[view];
+  if (updateUrl && path && location.pathname !== path) history.pushState(null, '', `${path}${location.search}`);
   const ids = ['home-screen', 'play-screen', 'setup-screen', 'online-screen', 'rankings-screen', 'stats-screen', 'skins-screen', 'settings-screen', 'tutorial-screen', 'game-screen', 'result-screen', 'handoff-screen'];
   ids.forEach((id) => $(`#${id}`).classList.toggle('hidden', id !== `${view}-screen`));
   document.body.classList.toggle('in-game', view === 'game' || view === 'handoff');
@@ -613,8 +618,9 @@ function updateSetting(key, value) {
   saveData();
 }
 
-function openTutorial() {
+function openTutorial(returnView = 'home') {
   tutorialIndex = 0;
+  tutorialReturnView = returnView;
   renderTutorial();
   showView('tutorial');
 }
@@ -624,7 +630,11 @@ function continueInitialView() {
     showView('online');
     showOnlinePanel('join');
     connectOnline();
-  } else if (!data.tutorialComplete) openTutorial();
+  } else if (!data.tutorialComplete) openTutorial(initialPageView);
+  else {
+    showView(initialPageView);
+    if (initialPageView === 'online') connectOnline();
+  }
 }
 
 function renderTutorial() {
@@ -640,7 +650,8 @@ function renderTutorial() {
 function finishTutorial() {
   data.tutorialComplete = true;
   saveData();
-  showView('home');
+  showView(tutorialReturnView);
+  if (tutorialReturnView === 'online') connectOnline();
 }
 
 function returnToHome() {
@@ -986,13 +997,19 @@ function sendOnlineMessage(message) {
   }
 }
 
-$$('[data-view]').forEach((button) => button.addEventListener('click', () => {
+$$('[data-view]').forEach((button) => button.addEventListener('click', (event) => {
+  if (button instanceof HTMLAnchorElement) event.preventDefault();
   showView(button.dataset.view);
   if (button.dataset.view === 'online') {
     connectOnline();
     if (button.dataset.onlinePanel) showOnlinePanel(button.dataset.onlinePanel);
   }
 }));
+window.addEventListener('popstate', () => {
+  const view = Object.keys(PAGE_PATHS).find((page) => PAGE_PATHS[page] === location.pathname) || 'home';
+  showView(view, false);
+  if (view === 'online') connectOnline();
+});
 $('#choose-create-room').addEventListener('click', () => showOnlinePanel('host'));
 $('#choose-join-room').addEventListener('click', () => showOnlinePanel('join'));
 $$('[data-online-back]').forEach((button) => button.addEventListener('click', () => showOnlinePanel('choices')));
