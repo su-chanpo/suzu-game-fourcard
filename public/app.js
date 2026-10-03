@@ -743,7 +743,7 @@ function setBgm(enabled) {
 function connectOnline() {
   if (socket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(socket.readyState)) return;
   let serverAddress = String(data.settings.serverUrl || '').trim();
-  if (!serverAddress || /^https?:\/\/demo\.workers\.dev\/?$/i.test(serverAddress)) {
+  if (!serverAddress || /^https?:\/\/demo\.workers\.dev\/?$/i.test(serverAddress) || pendingInvitePassphrase) {
     serverAddress = ['http:', 'https:'].includes(location.protocol) ? location.origin : '';
   }
   if (!serverAddress) {
