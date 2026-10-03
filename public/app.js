@@ -276,10 +276,16 @@ function renderTurnTimer() {
 
 function renderOpponents() {
   const viewerIndex = game.mode === 'local' ? game.current : game.mode === 'online' ? game.meIndex : 0;
-  const opponents = $('#opponents');
-  opponents.replaceChildren();
+  const seats = {
+    top: $('#seat-top'),
+    left: $('#seat-left'),
+    right: $('#seat-right'),
+  };
+  Object.values(seats).forEach((seat) => seat.replaceChildren());
   game.players.forEach((player, index) => {
     if (index === viewerIndex) return;
+    const relativeIndex = (index - viewerIndex + game.players.length) % game.players.length;
+    const seat = game.players.length === 2 ? 'top' : relativeIndex === 1 ? 'right' : relativeIndex === 2 ? 'top' : 'left';
     const current = game.mode === 'online' && index === game.current;
     const opponent = document.createElement('div');
     opponent.className = `opponent${current ? ' is-current' : ''}`;
@@ -351,7 +357,7 @@ function renderOpponents() {
       cardRow.append(slot);
     });
     opponent.append(playerHeader, cardRow);
-    opponents.append(opponent);
+    seats[seat].append(opponent);
   });
 }
 
