@@ -131,7 +131,7 @@ export class GameHub {
       }
     }
     const rooms = await this.ctx.storage.get('rooms') || {};
-    const room = Object.values(rooms).find((entry) => entry.players.some((player) => player.id === playerId));
+    const room = this.findPlayerRoom(rooms, playerId);
     ws.serializeAttachment({ playerId, roomId: room?.id || null });
     if (room) {
       const player = room.players.find((entry) => entry.id === playerId);
@@ -568,7 +568,7 @@ export class GameHub {
   }
 
   findPlayerRoom(rooms, playerId) {
-    return Object.values(rooms).find((room) => room.players.some((player) => player.id === playerId && room.status !== 'complete'));
+    return Object.values(rooms).find((room) => room.status !== 'complete' && room.players.some((player) => player.id === playerId));
   }
 
   socketFor(playerId) {
