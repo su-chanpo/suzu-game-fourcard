@@ -1,55 +1,53 @@
-# Cloudflare deployment
+# Cloudflareへのデプロイ
 
-The app is served by Cloudflare Workers Assets. A Durable Object owns matchmaking, rooms, deck state, turns, and score calculation. The Worker only sends each player the cards they are allowed to see.
+このアプリはCloudflare Workers Assetsで配信します。Durable Objectがマッチング、ルーム、山札、手番、得点計算を管理します。Workerは各プレイヤーが見てよいカードだけを送信します。
 
-## Local development
+## ローカルでの開発
 
-Requires Node.js 20. Run from the repository root:
+Node.js 20が必要です。リポジトリのルートフォルダーで次を実行します。
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Wrangler. The Worker serves the web app, `/api/health`, and the `/ws` WebSocket endpoint. Only browser assets are copied to `dist/`; Worker source and configuration are not published as static files.
+Wranglerが表示するローカルURLを開いてください。WorkerはWebアプリ、`/api/health`、WebSocket接続先の`/ws`を提供します。ブラウザー用ファイルだけが`dist/`へコピーされ、Workerのソースコードや設定ファイルは静的ファイルとして公開されません。
 
-## Deploy
+## 手動でのデプロイ
 
-1. Create or sign in to a Cloudflare account and install dependencies with `npm install`.
-2. Authenticate Wrangler with `npx wrangler login`.
-3. Deploy using `npm run deploy`.
-4. Open the `workers.dev` URL. On the online screen, enter `https://<worker-host>` as the Worker URL; the client derives `wss://<worker-host>/ws` automatically.
-5. Check `https://<worker-host>/api/health` for the health response.
+1. Cloudflareアカウントを作成するか、既存のアカウントにログインし、`npm install`で依存パッケージをインストールします。
+2. `npx wrangler login`を実行してWranglerをCloudflareに認証します。
+3. `npm run deploy`を実行してデプロイします。
+4. 発行された`workers.dev`のURLを開きます。ゲームのオンライン画面にはWorkerのURLとして`https://<worker-host>`を入力してください。WebSocket接続先の`wss://<worker-host>/ws`は自動で設定されます。
+5. `https://<worker-host>/api/health`を開き、正常応答が返ることを確認します。
 
-## Deploy from GitHub
+## GitHubからの自動デプロイ
 
-The workflow at `.github/workflows/deploy-cloudflare.yml` deploys on every push to `main` and can also be run manually from the repository's Actions tab.
+`.github/workflows/deploy-cloudflare.yml`のGitHub Actionsワークフローは、`main`ブランチへのpushごとにデプロイします。GitHubのActions画面から手動で実行することもできます。初回デプロイ時は、次の手順を順番に行ってください。
 
-The workflow deploys on pushes to `main`. For the first deployment, complete these steps in order:
+1. [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)を開き、カスタムトークンを作成します。権限にはAccountの`Workers Scripts: Edit`と`Account Settings: Read`を指定し、対象のCloudflareアカウントを選択します。
+2. 作成後に一度だけ表示されるトークンをコピーし、安全な場所に控えます。トークンをリポジトリやチャットに貼り付けないでください。
+3. GitHubの[Actions Secrets設定](https://github.com/su-chanpo/suzu-game-fourcard/settings/secrets/actions)を開き、**New repository secret**から次の2つを登録します。`CLOUDFLARE_API_TOKEN`には手順2のトークン、`CLOUDFLARE_ACCOUNT_ID`にはCloudflareダッシュボードに表示されるAccount IDを設定してください。
+4. [GitHub Actions](https://github.com/su-chanpo/suzu-game-fourcard/actions)を開き、`Deploy to Cloudflare`の実行結果を確認します。Secretsの登録前にpushした実行が失敗または停止していた場合は、Secretsを登録したあと、**Deploy to Cloudflare > Run workflow > main > Run workflow**を選んで再実行してください。
+5. 実行が成功したら、ログに表示される`workers.dev`のURLを開きます。`https://<Workerのホスト名>/api/health`が`"ok":true`を返すことを確認してください。ゲームのオンライン画面には`https://<Workerのホスト名>`を入力します。
 
-1. Cloudflareにログインし、[API Tokens](https://dash.cloudflare.com/profile/api-tokens)からカスタムトークンを作成します。権限はAccountの`Workers Scripts: Edit`と`Account Settings: Read`にし、対象アカウントを選択します。
-2. トークン作成後に表示される値をコピーします。トークンは再表示できないため、安全な場所に控えてください。リポジトリやチャットには貼り付けないでください。
-3. GitHubの[Actions Secrets設定](https://github.com/su-chanpo/suzu-game-fourcard/settings/secrets/actions)を開き、**New repository secret**を2件作成します。`CLOUDFLARE_API_TOKEN`には手順2のトークン、`CLOUDFLARE_ACCOUNT_ID`にはCloudflareダッシュボードで確認できるAccount IDを設定します。
-4. [Actions](https://github.com/su-chanpo/suzu-game-fourcard/actions)を開き、`Deploy to Cloudflare`の実行結果を確認します。push直後の実行がSecrets登録前に失敗または停止していた場合は、Secrets登録後に **Deploy to Cloudflare > Run workflow > main > Run workflow** で再実行します。
-5. 実行が成功したらログに表示される`workers.dev` URLを開き、`https://<Workerのホスト名>/api/health`が`"ok":true`を返すことを確認します。ゲームのオンライン画面には、`https://<Workerのホスト名>`を入力します。
+GitHub Actionsの実行環境にはNode.js 20とWranglerが用意されるため、GitHub経由でデプロイするだけなら、手元のPCにNode.jsをインストールする必要はありません。
 
-GitHub ActionsはNode.js 20とWranglerを実行環境内に用意するため、デプロイだけなら手元のPCにNode.jsをインストールする必要はありません。
+Durable ObjectのSQLiteストレージは、`wrangler.toml`に記載した`v1`マイグレーションで作成します。初回デプロイ時に`GameHub`クラスが作成されます。デプロイ後にクラス名を変更したりマイグレーション設定を削除したりする場合は、事前にDurable Objectの移行計画を立ててください。
 
-Durable Object SQLite storage is provisioned by the `v1` migration in `wrangler.toml`. The first deployment creates the `GameHub` class. Do not rename the class or remove its migration after deployment without planning a Durable Object migration.
+## WebSocketプロトコル
 
-## WebSocket protocol
+メッセージはJSON形式です。最初に`session.join`を送信してください。サーバーは`session.ready`とゲスト用の再接続トークンを返します。
 
-Messages are JSON. Send `session.join` first. The server responds with `session.ready` and a guest resume token.
+- `match.quick`: 次に参加するプレイヤーと2人対戦を開始します。
+- `room.create`: `maxPlayers`に2〜4人を指定して、6文字のルームIDを作成します。
+- `room.join`: 参加待ちのルームに入ります。指定人数に達するとゲームが始まります。
+- `room.start`: 参加者が2人以上いれば、満員になる前でもルーム作成者がゲームを開始できます。
+- `game.action`: `{ "action": "reveal" | "draw" | "discard", "index": 0 }`を送信して、現在の手番の操作を行います。
+- `room.leave`: 参加中のルームから退出します。
 
-- `match.quick`: joins the next available player for a 2-player quick match.
-- `room.create`: creates a 6-character room ID with `maxPlayers` from 2 to 4.
-- `room.join`: joins a waiting room; the game starts when the selected capacity is reached.
-- `room.start`: the room host can start with at least 2 joined players before the room is full.
-- `game.action`: `{ "action": "reveal" | "draw" | "discard", "index": 0 }` submits the current player's turn.
-- `room.leave`: leaves a room.
+サーバーはプレイヤーごとに個別の`game.state`を送信します。相手の伏せ札はデータに含めません。ゲスト用再接続トークンを持つ人は、そのプレイヤーとして接続できます。トークンを永続的な本人確認や機密プロフィール情報の保存に利用する前に、アカウント認証を追加してください。
 
-The server sends `game.state` separately to each player. Hidden opponent cards are omitted from the payload. Guest resume tokens are bearer credentials; add authenticated accounts before using them as durable identities or storing sensitive profile data.
+## 現在の対応範囲
 
-## Current scope
-
-The Worker implements guest sessions, 2-player quick match, 2-4 player private rooms, reconnect grace period, CPU takeover after 30 seconds, server-owned decks and turn validation, and per-player card visibility. Account authentication, D1-backed profiles and rankings, payments, and ad integrations are not configured. The current prototype routes all matches through one Durable Object, so production-scale matchmaking should shard this hub and add abuse controls before a public launch.
+Workerはゲストセッション、2人クイックマッチ、2〜4人のプライベートルーム、再接続猶予、30秒後のCPU代行、サーバー側での山札管理と手番検証、プレイヤーごとのカード表示制御に対応しています。アカウント認証、D1を使ったプロフィール・ランキング、決済、広告連携は未設定です。現在の試作版ではすべての対戦を1つのDurable Objectで処理します。一般公開や大規模運用の前に、処理の分割と不正利用対策を追加してください。
