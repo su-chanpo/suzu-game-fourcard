@@ -619,6 +619,14 @@ function openTutorial() {
   showView('tutorial');
 }
 
+function continueInitialView() {
+  if (pendingInvitePassphrase) {
+    showView('online');
+    showOnlinePanel('join');
+    connectOnline();
+  } else if (!data.tutorialComplete) openTutorial();
+}
+
 function renderTutorial() {
   const [title, copy] = TUTORIAL_STEPS[tutorialIndex];
   $('#tutorial-step-label').textContent = `TUTORIAL / STEP ${String(tutorialIndex + 1).padStart(2, '0')}`;
@@ -1034,6 +1042,23 @@ $('#settings-name').addEventListener('change', (event) => {
   saveData();
   renderHome();
 });
+$('#nickname-input').addEventListener('input', (event) => event.target.setCustomValidity(''));
+$('#nickname-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const input = $('#nickname-input');
+  const name = normalizeName(input.value, '');
+  if (!name) {
+    input.setCustomValidity('ニックネームを入力してください。');
+    input.reportValidity();
+    return;
+  }
+  data.profile.name = name;
+  playerNameInput.value = name;
+  saveData();
+  renderHome();
+  $('#nickname-dialog').close();
+});
+$('#nickname-dialog').addEventListener('close', continueInitialView);
 $('#setting-bgm').addEventListener('change', (event) => { updateSetting('bgm', event.target.checked); setBgm(event.target.checked); });
 $('#setting-sfx').addEventListener('change', (event) => updateSetting('sfx', event.target.checked));
 $('#setting-vibration').addEventListener('change', (event) => updateSetting('vibration', event.target.checked));
@@ -1113,8 +1138,6 @@ if (data.settings.notifications && 'Notification' in window && Notification.perm
   new Notification('フォーカード', { body: '今日のデイリーボーナスを受け取れます。' });
 }
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('./sw.js').catch(() => {});
-if (pendingInvitePassphrase) {
-  showView('online');
-  showOnlinePanel('join');
-  connectOnline();
-} else if (!data.tutorialComplete) openTutorial();
+if (data.profile.name === 'Player 1') {
+  $('#nickname-dialog').showModal();
+} else continueInitialView();
