@@ -1,0 +1,21 @@
+name: Question
+description: 質問や使い方の相談をする
+title: "[Question]: "
+body:
+  - type: markdown
+    attributes:
+      value: 質問の内容と、確認したことがあれば記入してください。
+  - type: textarea
+    id: question
+    attributes:
+      label: 質問
+      description: 知りたいことを具体的に記入してください。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景や試したこと
+      description: 質問に関係する背景や、すでに試したことを記入してください。
+    validations:
+      required: false
