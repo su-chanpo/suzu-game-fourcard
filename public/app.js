@@ -604,7 +604,6 @@ function renderSettings() {
   $('#setting-sfx').checked = data.settings.sfx;
   $('#setting-vibration').checked = data.settings.vibration;
   $('#setting-notifications').checked = data.settings.notifications;
-  $('#server-url').value = data.settings.serverUrl;
 }
 
 function updateSetting(key, value) {
@@ -740,8 +739,16 @@ function setBgm(enabled) {
 }
 
 function connectOnline() {
-  const serverAddress = $('#server-url').value.trim();
-  if (!serverAddress) return showToast('Cloudflare WorkerのURLを入力してください');
+  if (socket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(socket.readyState)) return;
+  let serverAddress = String(data.settings.serverUrl || '').trim();
+  if (!serverAddress || /^https?:\/\/demo\.workers\.dev\/?$/i.test(serverAddress)) {
+    serverAddress = ['http:', 'https:'].includes(location.protocol) ? location.origin : '';
+  }
+  if (!serverAddress) {
+    setConnectionStatus(false, 'サーバー未設定');
+    disableOnlineActions();
+    return;
+  }
   clearTimeout(reconnectTimer);
   if (socket) {
     const previousSocket = socket;
@@ -787,6 +794,8 @@ function handleOnlineMessage(raw) {
     data.onlineSession = { playerId: message.playerId, resumeToken: message.resumeToken };
     saveData();
     setConnectionStatus(true, '接続中');
+    $('#choose-create-room').disabled = false;
+    $('#choose-join-room').disabled = false;
     $('#quick-match').disabled = false;
     $('#create-room').disabled = false;
     $('#join-room-form button').disabled = false;
@@ -799,11 +808,14 @@ function handleOnlineMessage(raw) {
   } else if (message.type === 'match.queued') {
     $('#matchmaking-message').textContent = '公開中のホスト募集を待っています…';
     $('#matchmaking-status').classList.remove('hidden');
+    $('#join-actions').classList.add('hidden');
+    $('#join-setup .online-back').disabled = true;
     $('#quick-match').disabled = true;
     showToast('対戦相手を探しています…');
   } else if (message.type === 'match.found') {
     $('#matchmaking-status').classList.add('hidden');
     $('#online-lobby').classList.add('hidden');
+    showOnlinePanel('choices');
     showToast('対戦相手が見つかりました');
   } else if (message.type === 'room.joined') {
     $('#matchmaking-status').classList.add('hidden');
@@ -811,7 +823,7 @@ function handleOnlineMessage(raw) {
     updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.passphrase, message.settings);
     showToast('ルームに参加しました');
   } else if (message.type === 'room.started') {
-    $('#online-lobby').classList.add('hidden');
+    showOnlinePanel('choices');
     showToast('対戦を開始します');
   } else if (message.type === 'room.updated') {
     updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.passphrase, message.settings);
@@ -819,10 +831,10 @@ function handleOnlineMessage(raw) {
     showToast(`${message.playerName}の時間切れ。CPUが代わりに操作しました`);
   } else if (message.type === 'match.cancelled' || message.type === 'room.left') {
     $('#matchmaking-status').classList.add('hidden');
-    $('#online-lobby').classList.add('hidden');
+    $('#join-actions').classList.remove('hidden');
+    $('#join-setup .online-back').disabled = false;
     $('#quick-match').disabled = false;
-    $('#lobby-passphrase').classList.add('hidden');
-    $('#copy-passphrase').classList.add('hidden');
+    showOnlinePanel(message.type === 'room.left' ? 'choices' : 'join');
   } else if (message.type === 'game.state') {
     applyOnlineState(message.state);
   } else if (message.type === 'connection.lost' || message.type === 'connection.cpu') {
@@ -838,7 +850,7 @@ function handleOnlineMessage(raw) {
 
 function updateOnlineLobby(roomId, players, maxPlayers, hostId, passphrase, settings = {}) {
   onlineRoomHost = hostId === data.onlineSession.playerId;
-  $('#online-lobby').classList.remove('hidden');
+  showOnlinePanel('lobby');
   $('#online-room-label').textContent = '対戦待機中';
   $('#online-lobby').dataset.hostId = hostId || '';
   $('#online-lobby').dataset.roomId = roomId || '';
@@ -849,6 +861,11 @@ function updateOnlineLobby(roomId, players, maxPlayers, hostId, passphrase, sett
   $('#lobby-rule-settings').disabled = !onlineRoomHost;
   $('#start-room').classList.toggle('hidden', !onlineRoomHost);
   $('#start-room').disabled = !onlineRoomHost || players.length < 2;
+}
+
+function showOnlinePanel(panel) {
+  const panels = { choices: '#online-choices', host: '#host-setup', join: '#join-setup', lobby: '#online-lobby' };
+  for (const [name, selector] of Object.entries(panels)) $(selector).classList.toggle('hidden', name !== panel);
 }
 
 function fromServerCard(card) {
@@ -922,6 +939,8 @@ function setConnectionStatus(connected, message) {
 }
 
 function disableOnlineActions() {
+  $('#choose-create-room').disabled = true;
+  $('#choose-join-room').disabled = true;
   $('#quick-match').disabled = true;
   $('#create-room').disabled = true;
   $('#join-room-form button').disabled = true;
@@ -942,7 +961,15 @@ function sendOnlineMessage(message) {
   }
 }
 
-$$('[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
+$$('[data-view]').forEach((button) => button.addEventListener('click', () => {
+  showView(button.dataset.view);
+  if (button.dataset.view === 'online') {
+    connectOnline();
+  }
+}));
+$('#choose-create-room').addEventListener('click', () => showOnlinePanel('host'));
+$('#choose-join-room').addEventListener('click', () => showOnlinePanel('join'));
+$$('[data-online-back]').forEach((button) => button.addEventListener('click', () => showOnlinePanel('choices')));
 $$('[data-mode]').forEach((button) => button.addEventListener('click', () => beginSetup(button.dataset.mode)));
 $$('[data-period]').forEach((button) => button.addEventListener('click', () => { rankingPeriod = button.dataset.period; renderRankings(); }));
 playerCountInput.addEventListener('change', renderLocalNameInputs);
@@ -1001,7 +1028,6 @@ $('#setting-notifications').addEventListener('change', async (event) => {
 });
 $('#export-data').addEventListener('click', exportSaveData);
 $('#import-data').addEventListener('change', (event) => { if (event.target.files[0]) importSaveData(event.target.files[0]); event.target.value = ''; });
-$('#connect-button').addEventListener('click', connectOnline);
 $('#quick-match').addEventListener('click', () => sendOnlineMessage({ type: 'match.quick', name: data.profile.name }));
 $('#create-room').addEventListener('click', () => sendOnlineMessage({
   type: 'room.create',
@@ -1016,9 +1042,7 @@ $('#start-room').addEventListener('click', () => sendOnlineMessage({ type: 'room
 $('#leave-room').addEventListener('click', () => {
   sendOnlineMessage({ type: 'room.leave' });
   onlineRoomHost = false;
-  $('#online-lobby').classList.add('hidden');
-  $('#lobby-passphrase').classList.add('hidden');
-  $('#copy-passphrase').classList.add('hidden');
+  showOnlinePanel('choices');
   showToast('ルームを退出しました');
 });
 $('#copy-passphrase').addEventListener('click', async () => {
@@ -1043,7 +1067,6 @@ function sendRoomSettings() {
 
 data.profile.name = normalizeName(data.profile.name || localStorage.getItem('fourcard-player-name'), 'Player 1');
 playerNameInput.value = data.profile.name;
-$('#server-url').value = data.settings.serverUrl;
 applySkins();
 renderHome();
 renderLocalNameInputs();
