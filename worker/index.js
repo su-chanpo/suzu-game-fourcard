@@ -6,6 +6,7 @@ const RANKS = [
 const ROOM_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const MAX_MESSAGE_BYTES = 4096;
 const RECONNECT_GRACE_MS = 30_000;
+const COMPLETE_ROOM_CLEANUP_MS = 30_000;
 
 function jsonResponse(value, status = 200) {
   return Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -72,7 +73,13 @@ export class GameHub {
     const rooms = await this.ctx.storage.get('rooms') || {};
     const now = Date.now();
     let nextAlarm = Infinity;
-    for (const room of Object.values(rooms)) {
+    for (const roomId of Object.keys(rooms)) {
+      const room = rooms[roomId];
+      if (room.status === 'complete') {
+        if (!room.completedAt || now - room.completedAt >= COMPLETE_ROOM_CLEANUP_MS) delete rooms[roomId];
+        else nextAlarm = Math.min(nextAlarm, room.completedAt + COMPLETE_ROOM_CLEANUP_MS);
+        continue;
+      }
       for (const player of room.players) {
         if (!player.connected && !player.isCPU && player.disconnectedAt) {
           const remaining = player.disconnectedAt + RECONNECT_GRACE_MS - now;
@@ -315,7 +322,9 @@ export class GameHub {
     }
     if (room) {
       const playerIndex = room.players.findIndex((entry) => entry.id === attachment.playerId);
-      if (playerIndex >= 0 && room.status === 'waiting') {
+      if (room.status === 'complete') {
+        delete rooms[room.id];
+      } else if (playerIndex >= 0 && room.status === 'waiting') {
         room.players.splice(playerIndex, 1);
         if (room.hostId === attachment.playerId) room.hostId = room.players[0]?.id || null;
         if (!room.players.length) delete rooms[room.id];
@@ -465,6 +474,9 @@ export class GameHub {
       if (room.status === 'playing' && room.turnDeadline && !room.players[room.current]?.isCPU) {
         nextAlarm = Math.min(nextAlarm, room.turnDeadline);
       }
+      if (room.status === 'complete') {
+        nextAlarm = Math.min(nextAlarm, (room.completedAt || Date.now()) + COMPLETE_ROOM_CLEANUP_MS);
+      }
     }
     if (nextAlarm < Infinity) await this.ctx.storage.setAlarm(nextAlarm);
   }
@@ -489,6 +501,7 @@ export class GameHub {
   }
 
   finishRoom(room) {
+    room.completedAt = Date.now();
     room.players.forEach((entry) => { entry.score = this.score(entry.cards); });
     room.players.sort((left, right) => left.score - right.score);
     let place = 0;
