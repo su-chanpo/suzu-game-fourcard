@@ -1,0 +1,39 @@
+name: Bug report
+description: バグや不具合を報告する
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: バグの内容をできるだけ詳しく記入してください。
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: 不具合の内容
+      description: 何が起きたかを記入してください。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: 再現手順
+      description: 不具合を再現する手順を記入してください。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 期待する動作
+      description: 本来どのように動作するべきかを記入してください。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: 使用しているブラウザーや端末などを記入してください。
+    validations:
+      required: false
