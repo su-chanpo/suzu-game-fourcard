@@ -50,6 +50,7 @@ export class GameHub {
       if (message.type === 'match.cancel') return await this.cancelMatch(ws, attachment);
       if (message.type === 'room.create') return await this.createRoom(ws, attachment, message);
       if (message.type === 'room.join') return await this.joinRoom(ws, attachment, message);
+      if (message.type === 'room.settings') return await this.updateRoomSettings(ws, attachment, message);
       if (message.type === 'room.start') return await this.startRoom(ws, attachment);
       if (message.type === 'game.action') return await this.gameAction(ws, attachment, message);
       if (message.type === 'room.leave') return await this.leaveRoom(ws, attachment);
@@ -84,7 +85,18 @@ export class GameHub {
           }
         }
       }
-      if (room.status === 'playing') await this.runDisconnectedCpu(room);
+      if (room.status === 'playing') {
+        if (room.players[room.current]?.isCPU) {
+          await this.runDisconnectedCpu(room);
+        } else if (room.turnDeadline && room.turnDeadline <= now) {
+          const player = room.players[room.current];
+          this.playCpuTurn(room, player, room.settings?.cpuDifficulty || 'normal');
+          this.broadcastRoom(room, { type: 'turn.timeout', playerName: player.name });
+          if (room.status === 'playing' && room.players[room.current]?.isCPU) await this.runDisconnectedCpu(room);
+          else this.broadcastState(room);
+        }
+        if (room.turnDeadline && !room.players[room.current]?.isCPU) nextAlarm = Math.min(nextAlarm, room.turnDeadline);
+      }
     }
     await this.ctx.storage.put('rooms', rooms);
     if (nextAlarm < Infinity) await this.ctx.storage.setAlarm(nextAlarm);
@@ -125,7 +137,7 @@ export class GameHub {
     }
     this.send(ws, { type: 'session.ready', playerId, resumeToken: token });
     if (room) {
-      this.send(ws, { type: room.status === 'waiting' ? 'room.joined' : 'match.found', roomId: room.id, hostId: room.hostId, matchType: room.matchType, passphrase: room.hostId === playerId ? room.passphrase : '', maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
+      this.send(ws, { type: room.status === 'waiting' ? 'room.joined' : 'match.found', roomId: room.id, hostId: room.hostId, matchType: room.matchType, passphrase: room.passphrase || room.id, settings: room.settings, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
       if (room.status === 'playing') this.sendStateTo(ws, room, playerId);
       else this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: room.players.map(({ id, name: playerName }) => ({ id, name: playerName })) });
     } else if ((await this.ctx.storage.get('queue') || []).some((entry) => entry.playerId === playerId)) {
@@ -159,53 +171,56 @@ export class GameHub {
     if (this.findPlayerRoom(rooms, attachment.playerId)) throw new Error('すでにルームまたは対戦に参加しています。');
     const maxPlayers = Number(message.maxPlayers);
     if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 4) throw new Error('プレイヤー人数は2〜4人で指定してください。');
-    const matchType = message.matchType === 'passphrase' ? 'passphrase' : 'random';
-    const passphrase = matchType === 'passphrase' ? this.normalizePassphrase(message.passphrase) : '';
-    if (matchType === 'passphrase' && (passphrase.length < 3 || passphrase.length > 24)) throw new Error('合言葉は3〜24文字で設定してください。');
-    if (matchType === 'passphrase' && Object.values(rooms).some((room) => room.status === 'waiting' && room.passphrase === passphrase)) {
-      throw new Error('同じ合言葉の募集がすでにあります。別の合言葉を設定してください。');
-    }
-    const room = this.newRoom([{ id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, connected: true, turns: 0 }]);
+    let roomId = this.randomRoomCode(5);
+    while (rooms[roomId]) roomId = this.randomRoomCode(5);
+    const room = this.newRoom([{ id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, connected: true, turns: 0 }], roomId);
     room.maxPlayers = maxPlayers;
     room.hostId = attachment.playerId;
-    room.matchType = matchType;
-    room.passphrase = passphrase;
+    room.matchType = 'random';
+    room.passphrase = room.id;
+    room.settings = { turnTimeSeconds: 60, cpuDifficulty: 'normal' };
     let queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId && this.socketFor(entry.playerId) && !this.findPlayerRoom(rooms, entry.playerId));
-    if (matchType === 'random') {
-      while (queue.length && room.players.length < room.maxPlayers) {
-        const waitingPlayer = queue.shift();
-        room.players.push({ id: waitingPlayer.playerId, name: this.cleanName(waitingPlayer.name, 'Player'), isCPU: false, connected: true, turns: 0 });
-      }
+    while (queue.length && room.players.length < room.maxPlayers) {
+      const waitingPlayer = queue.shift();
+      room.players.push({ id: waitingPlayer.playerId, name: this.cleanName(waitingPlayer.name, 'Player'), isCPU: false, connected: true, turns: 0 });
     }
     rooms[room.id] = room;
     await this.ctx.storage.put('rooms', rooms);
     await this.ctx.storage.put('queue', queue);
     ws.serializeAttachment({ ...attachment, roomId: room.id });
-    this.send(ws, { type: 'room.created', roomId: room.id, hostId: room.hostId, matchType, passphrase, players: this.publicPlayers(room), maxPlayers: room.maxPlayers });
+    this.send(ws, { type: 'room.created', roomId: room.id, hostId: room.hostId, matchType: room.matchType, passphrase: room.passphrase, settings: room.settings, players: this.publicPlayers(room), maxPlayers: room.maxPlayers });
     for (const player of room.players.slice(1)) {
       const playerSocket = this.socketFor(player.id);
       if (!playerSocket) continue;
       playerSocket.serializeAttachment({ playerId: player.id, roomId: room.id });
-      this.send(playerSocket, { type: 'room.joined', roomId: room.id, hostId: room.hostId, matchType, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
+      this.send(playerSocket, { type: 'room.joined', roomId: room.id, hostId: room.hostId, matchType: room.matchType, passphrase: room.passphrase, settings: room.settings, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
     }
-    if (room.players.length >= room.maxPlayers) {
-      this.startGame(room);
-      await this.ctx.storage.put('rooms', rooms);
-      this.broadcastRoom(room, { type: 'room.started', roomId: room.id, players: this.publicPlayers(room) });
-      this.broadcastState(room);
-    } else if (room.players.length > 1) {
+    if (room.players.length > 1) {
       this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: this.publicPlayers(room) });
     }
   }
 
   async joinRoom(ws, attachment, message) {
     const passphrase = this.normalizePassphrase(message.passphrase);
-    if (passphrase.length < 3 || passphrase.length > 24) throw new Error('合言葉は3〜24文字で入力してください。');
+    if (!/^[A-HJ-NP-Z2-9]{5}$/.test(passphrase)) throw new Error('合言葉は5文字で入力してください。');
     const rooms = await this.ctx.storage.get('rooms') || {};
-    const room = Object.values(rooms).find((entry) => entry.status === 'waiting' && entry.matchType === 'passphrase' && entry.passphrase === passphrase);
-    if (!room) throw new Error('その合言葉の募集が見つかりません。');
+    const room = rooms[passphrase];
+    if (!room || room.status !== 'waiting') throw new Error('その合言葉のルームが見つかりません。');
     if (this.findPlayerRoom(rooms, attachment.playerId)) throw new Error('すでにルームまたは対戦に参加しています。');
     await this.addPlayerToRoom(ws, attachment, rooms, room, message.name);
+  }
+
+  async updateRoomSettings(ws, attachment, message) {
+    const rooms = await this.ctx.storage.get('rooms') || {};
+    const room = rooms[attachment.roomId];
+    if (!room || room.status !== 'waiting' || room.hostId !== attachment.playerId) throw new Error('待機中のホストだけがルールを変更できます。');
+    const turnTimeSeconds = Number(message.settings?.turnTimeSeconds);
+    const cpuDifficulty = message.settings?.cpuDifficulty;
+    if (![0, 30, 60, 90].includes(turnTimeSeconds)) throw new Error('制限時間の設定が正しくありません。');
+    if (!['easy', 'normal', 'hard', 'expert'].includes(cpuDifficulty)) throw new Error('CPU難易度の設定が正しくありません。');
+    room.settings = { turnTimeSeconds, cpuDifficulty };
+    await this.ctx.storage.put('rooms', rooms);
+    this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: this.publicPlayers(room) });
   }
 
   async addPlayerToRoom(ws, attachment, rooms, room, name) {
@@ -214,17 +229,9 @@ export class GameHub {
     const queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId);
     await this.ctx.storage.put('queue', queue);
     ws.serializeAttachment({ ...attachment, roomId: room.id });
-    this.send(ws, { type: 'room.joined', roomId: room.id, hostId: room.hostId, matchType: room.matchType, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
-    if (room.players.length >= room.maxPlayers) {
-      this.startGame(room);
-    } else {
-      this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: this.publicPlayers(room) });
-    }
+    this.send(ws, { type: 'room.joined', roomId: room.id, hostId: room.hostId, matchType: room.matchType, passphrase: room.passphrase || room.id, settings: room.settings, maxPlayers: room.maxPlayers, players: this.publicPlayers(room) });
+    this.broadcastRoom(room, { type: 'room.updated', roomId: room.id, players: this.publicPlayers(room) });
     await this.ctx.storage.put('rooms', rooms);
-    if (room.status === 'playing') {
-      this.broadcastRoom(room, { type: 'room.started', roomId: room.id, players: this.publicPlayers(room) });
-      this.broadcastState(room);
-    }
   }
 
   async startRoom(ws, attachment) {
@@ -235,6 +242,7 @@ export class GameHub {
     if (room.players.length < 2) throw new Error('対戦には2人以上必要です。');
     this.startGame(room);
     await this.ctx.storage.put('rooms', rooms);
+    await this.scheduleAlarm(rooms);
     this.broadcastRoom(room, { type: 'room.started', roomId: room.id, players: this.publicPlayers(room) });
     this.broadcastState(room);
   }
@@ -245,6 +253,15 @@ export class GameHub {
     if (!room || room.status !== 'playing') throw new Error('進行中の対戦がありません。');
     const player = room.players.find((entry) => entry.id === attachment.playerId);
     if (!player || player.isCPU || room.players[room.current].id !== player.id) throw new Error('現在の手番ではありません。');
+    if (room.turnDeadline && room.turnDeadline <= Date.now()) {
+      this.playCpuTurn(room, player, room.settings?.cpuDifficulty || 'normal');
+      this.broadcastRoom(room, { type: 'turn.timeout', playerName: player.name });
+      if (room.status === 'playing' && room.players[room.current]?.isCPU) await this.runDisconnectedCpu(room);
+      await this.ctx.storage.put('rooms', rooms);
+      await this.scheduleAlarm(rooms);
+      this.broadcastState(room);
+      return;
+    }
     const index = Number(message.index);
     if (!Number.isInteger(index) || index < 0 || index > 3) throw new Error('カードの位置が正しくありません。');
     const slot = player.cards[index];
@@ -269,13 +286,16 @@ export class GameHub {
     room.lastAction = { playerId: player.id, action: message.action, index };
     if (room.players.every((entry) => entry.turns >= 4)) {
       room.status = 'complete';
+      room.turnDeadline = null;
       this.finishRoom(room);
     } else {
       room.current = (room.current + 1) % room.players.length;
+      this.resetTurnDeadline(room);
     }
     const cpuTookTurns = room.status === 'playing' && room.players[room.current].isCPU;
     if (cpuTookTurns) await this.runDisconnectedCpu(room);
     await this.ctx.storage.put('rooms', rooms);
+    await this.scheduleAlarm(rooms);
     if (!cpuTookTurns) this.broadcastState(room);
   }
 
@@ -306,6 +326,7 @@ export class GameHub {
         if (room.players[room.current].id === player.id) await this.runDisconnectedCpu(room);
       }
       await this.ctx.storage.put('rooms', rooms);
+      await this.scheduleAlarm(rooms);
     }
     ws.serializeAttachment({ ...attachment, roomId: null });
     this.send(ws, { type: 'room.left' });
@@ -323,7 +344,7 @@ export class GameHub {
         player.connected = false;
         player.disconnectedAt = Date.now();
         await this.ctx.storage.put('rooms', rooms);
-        await this.ctx.storage.setAlarm(Date.now() + RECONNECT_GRACE_MS);
+        await this.scheduleAlarm(rooms);
         this.broadcastRoom(room, { type: 'connection.lost', playerId: player.id, reconnectInSeconds: RECONNECT_GRACE_MS / 1000 });
       }
     }
@@ -334,32 +355,79 @@ export class GameHub {
     while (room.status === 'playing' && room.players[room.current].isCPU && safety < 16) {
       safety += 1;
       const player = room.players[room.current];
-      const hidden = player.cards.map((slot, index) => !slot.revealed ? index : -1).filter((index) => index >= 0);
-      const index = hidden[0] ?? 0;
-      const best = player.cards.reduce((bestIndex, slot, slotIndex, cards) => slot.card.point > cards[bestIndex].card.point ? slotIndex : bestIndex, 0);
-      if (room.discard.point < player.cards[best].card.point) {
-        const old = player.cards[best].card;
-        player.cards[best] = { card: room.discard, revealed: true };
-        room.discard = old;
-      } else if (hidden.length) {
-        player.cards[index].revealed = true;
-      } else {
-        const drawn = this.draw(room);
-        room.waste.push(room.discard);
-        room.discard = player.cards[best].card;
-        player.cards[best] = { card: drawn, revealed: false };
-      }
-      player.turns += 1;
-      if (room.players.every((entry) => entry.turns >= 4)) {
-        room.status = 'complete';
-        this.finishRoom(room);
-      } else room.current = (room.current + 1) % room.players.length;
+      this.playCpuTurn(room, player, room.settings?.cpuDifficulty || 'normal');
     }
     this.broadcastState(room);
   }
 
-  newRoom(players) {
-    return { id: this.randomRoomCode(), status: 'waiting', maxPlayers: 4, players, current: 0, deck: [], discard: null, waste: [], createdAt: Date.now() };
+  playCpuTurn(room, player, difficulty) {
+    const hidden = player.cards.map((slot, index) => !slot.revealed ? index : -1).filter((index) => index >= 0);
+    const currentScore = this.score(player.cards);
+    const publicScores = player.cards.map((_, slotIndex) => this.score(player.cards.map((slot, cardIndex) => ({ ...slot, card: cardIndex === slotIndex ? room.discard : slot.card }))));
+    const bestPublicIndex = publicScores.indexOf(Math.min(...publicScores));
+    let action = 'draw';
+    let index = player.cards.reduce((bestIndex, slot, slotIndex, cards) => slot.card.point > cards[bestIndex].card.point ? slotIndex : bestIndex, 0);
+
+    if (difficulty === 'easy') {
+      const options = ['draw', 'discard', ...(hidden.length ? ['reveal'] : [])];
+      action = options[Math.floor(Math.random() * options.length)];
+      index = action === 'reveal' ? hidden[Math.floor(Math.random() * hidden.length)] : Math.floor(Math.random() * player.cards.length);
+    } else if (difficulty === 'normal') {
+      if (publicScores[bestPublicIndex] < currentScore) {
+        action = 'discard';
+        index = bestPublicIndex;
+      } else if (hidden.length && Math.random() < 0.3) {
+        action = 'reveal';
+        index = hidden[Math.floor(Math.random() * hidden.length)];
+      }
+    } else {
+      const candidates = room.deck.length ? room.deck : room.waste;
+      const expectedScores = player.cards.map((_, slotIndex) => candidates.length
+        ? candidates.reduce((total, card) => total + this.score(player.cards.map((slot, cardIndex) => ({ ...slot, card: cardIndex === slotIndex ? card : slot.card }))), 0) / candidates.length
+        : currentScore);
+      const bestDrawIndex = expectedScores.indexOf(Math.min(...expectedScores));
+      if (publicScores[bestPublicIndex] <= expectedScores[bestDrawIndex]) {
+        action = 'discard';
+        index = bestPublicIndex;
+      } else {
+        action = 'draw';
+        index = bestDrawIndex;
+      }
+      if (difficulty === 'expert' && hidden.length && Math.random() < 0.15) {
+        action = 'reveal';
+        index = hidden[Math.floor(Math.random() * hidden.length)];
+      }
+    }
+
+    const slot = player.cards[index];
+    if (action === 'reveal') {
+      slot.revealed = true;
+    } else if (action === 'discard') {
+      const oldCard = slot.card;
+      slot.card = room.discard;
+      slot.revealed = true;
+      room.discard = oldCard;
+    } else {
+      const drawn = this.draw(room);
+      room.waste.push(room.discard);
+      room.discard = slot.card;
+      slot.card = drawn;
+      slot.revealed = false;
+    }
+    player.turns += 1;
+    room.lastAction = { playerId: player.id, action, index, automatic: true };
+    if (room.players.every((entry) => entry.turns >= 4)) {
+      room.status = 'complete';
+      room.turnDeadline = null;
+      this.finishRoom(room);
+    } else {
+      room.current = (room.current + 1) % room.players.length;
+      this.resetTurnDeadline(room);
+    }
+  }
+
+  newRoom(players, roomId = this.randomRoomCode(5)) {
+    return { id: roomId, status: 'waiting', maxPlayers: 4, players, current: 0, deck: [], discard: null, waste: [], createdAt: Date.now() };
   }
 
   startGame(room) {
@@ -374,6 +442,27 @@ export class GameHub {
     room.current = 0;
     room.status = 'playing';
     room.startedAt = Date.now();
+    this.resetTurnDeadline(room);
+  }
+
+  resetTurnDeadline(room) {
+    const seconds = room.settings?.turnTimeSeconds || 0;
+    room.turnDeadline = room.status === 'playing' && seconds ? Date.now() + seconds * 1000 : null;
+  }
+
+  async scheduleAlarm(rooms) {
+    let nextAlarm = Infinity;
+    for (const room of Object.values(rooms)) {
+      for (const player of room.players) {
+        if (!player.connected && !player.isCPU && player.disconnectedAt) {
+          nextAlarm = Math.min(nextAlarm, player.disconnectedAt + RECONNECT_GRACE_MS);
+        }
+      }
+      if (room.status === 'playing' && room.turnDeadline && !room.players[room.current]?.isCPU) {
+        nextAlarm = Math.min(nextAlarm, room.turnDeadline);
+      }
+    }
+    if (nextAlarm < Infinity) await this.ctx.storage.setAlarm(nextAlarm);
   }
 
   draw(room) {
@@ -430,6 +519,8 @@ export class GameHub {
       discard: room.discard,
       deckCount: room.deck.length,
       startedAt: room.startedAt,
+      settings: room.settings || { turnTimeSeconds: 0, cpuDifficulty: 'normal' },
+      turnDeadline: room.turnDeadline || null,
       you: playerId,
       lastAction: room.lastAction || null,
     };
@@ -450,7 +541,7 @@ export class GameHub {
     for (const ws of this.ctx.getWebSockets()) {
       const attachment = ws.deserializeAttachment() || {};
       if (attachment.roomId === room.id || room.players.some((player) => player.id === attachment.playerId)) {
-        this.send(ws, { ...message, hostId: room.hostId, matchType: room.matchType, maxPlayers: room.maxPlayers });
+        this.send(ws, { ...message, hostId: room.hostId, matchType: room.matchType, passphrase: room.passphrase || room.id, settings: room.settings, maxPlayers: room.maxPlayers });
       }
     }
   }
@@ -476,7 +567,7 @@ export class GameHub {
   }
 
   normalizePassphrase(value) {
-    return typeof value === 'string' ? value.normalize('NFKC').trim().toLocaleLowerCase('ja') : '';
+    return typeof value === 'string' ? value.normalize('NFKC').trim().toUpperCase() : '';
   }
 
   randomToken() {
@@ -484,9 +575,9 @@ export class GameHub {
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  randomRoomCode() {
+  randomRoomCode(length = 5) {
     let code = '';
-    const bytes = crypto.getRandomValues(new Uint8Array(6));
+    const bytes = crypto.getRandomValues(new Uint8Array(length));
     for (const byte of bytes) code += ROOM_CODE_CHARS[byte % ROOM_CODE_CHARS.length];
     return code;
   }

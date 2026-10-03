@@ -91,6 +91,7 @@ let selectedAction = null;
 let busy = false;
 let toastTimer = null;
 let cpuTimer = null;
+let turnTimerInterval = null;
 let setupMode = 'cpu';
 let tutorialIndex = 0;
 let rankingPeriod = 'daily';
@@ -220,6 +221,7 @@ function renderGame() {
   if (!game) return;
   const currentPlayer = game.players[game.current];
   $('#round-label').textContent = `ROUND ${String(currentPlayer.turns + 1).padStart(2, '0')} / 04`;
+  renderTurnTimer();
   $('#game-title').textContent = currentPlayer.isCPU ? `${currentPlayer.name}のターン` : game.mode === 'local' ? `${currentPlayer.name}のターン` : game.mode === 'online' && game.current !== game.meIndex ? `${currentPlayer.name}のターン` : 'あなたのターン';
   $('#deck-count').textContent = String(game.deck.length).padStart(2, '0');
   $('#discard-pile').innerHTML = game.discard ? cardMarkup(game.discard) : '';
@@ -232,6 +234,26 @@ function renderGame() {
 
 function renderTrack() {
   $('#turn-track').innerHTML = game.players.map((player, index) => `<div class="track-item ${index === game.current ? 'is-current' : ''} ${player.turns >= 4 ? 'is-done' : ''}"><strong>${escapeHtml(player.name)}</strong><em>${Math.min(player.turns, 4)} / 4</em></div>`).join('');
+}
+
+function renderTurnTimer() {
+  const timer = $('#turn-timer');
+  if (game?.mode !== 'online' || !game.turnTimeSeconds || !game.turnDeadline || game.complete) {
+    timer.classList.add('hidden');
+    timer.classList.remove('is-urgent');
+    if (turnTimerInterval) clearInterval(turnTimerInterval);
+    turnTimerInterval = null;
+    return;
+  }
+  const update = () => {
+    if (!game || game.mode !== 'online' || !game.turnDeadline) return;
+    const remaining = Math.max(0, Math.ceil((game.turnDeadline - Date.now()) / 1000));
+    timer.textContent = `残り ${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+    timer.classList.toggle('is-urgent', remaining <= 10);
+  };
+  timer.classList.remove('hidden');
+  update();
+  if (!turnTimerInterval) turnTimerInterval = setInterval(update, 1000);
 }
 
 function renderOpponents() {
@@ -614,6 +636,8 @@ function finishTutorial() {
 
 function returnToHome() {
   clearTimeout(cpuTimer);
+  if (turnTimerInterval) clearInterval(turnTimerInterval);
+  turnTimerInterval = null;
   if (game?.mode === 'online') sendOnlineMessage({ type: 'room.leave' });
   game = null;
   selectedAction = null;
@@ -769,12 +793,9 @@ function handleOnlineMessage(raw) {
     $('#cancel-match').disabled = false;
   } else if (message.type === 'room.created') {
     $('#matchmaking-status').classList.add('hidden');
-    $('#lobby-passphrase').textContent = message.passphrase ? `合言葉: ${message.passphrase}` : '';
-    $('#lobby-passphrase').classList.toggle('hidden', !message.passphrase);
-    $('#copy-passphrase').classList.toggle('hidden', !message.passphrase);
     onlineRoomHost = true;
-    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.matchType);
-    showToast(message.matchType === 'passphrase' ? '合言葉募集を開始しました' : 'ランダム募集を開始しました');
+    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.passphrase, message.settings);
+    showToast('ルームを作成しました。合言葉を共有してください');
   } else if (message.type === 'match.queued') {
     $('#matchmaking-message').textContent = '公開中のホスト募集を待っています…';
     $('#matchmaking-status').classList.remove('hidden');
@@ -787,16 +808,15 @@ function handleOnlineMessage(raw) {
   } else if (message.type === 'room.joined') {
     $('#matchmaking-status').classList.add('hidden');
     onlineRoomHost = message.hostId === data.onlineSession.playerId;
-    $('#lobby-passphrase').textContent = onlineRoomHost && message.passphrase ? `合言葉: ${message.passphrase}` : '';
-    $('#lobby-passphrase').classList.toggle('hidden', !onlineRoomHost || !message.passphrase);
-    $('#copy-passphrase').classList.toggle('hidden', !onlineRoomHost || !message.passphrase);
-    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.matchType);
-    showToast(message.matchType === 'random' ? 'ホストの募集に参加しました' : '合言葉で募集に参加しました');
+    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.passphrase, message.settings);
+    showToast('ルームに参加しました');
   } else if (message.type === 'room.started') {
     $('#online-lobby').classList.add('hidden');
     showToast('対戦を開始します');
   } else if (message.type === 'room.updated') {
-    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.matchType);
+    updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.passphrase, message.settings);
+  } else if (message.type === 'turn.timeout') {
+    showToast(`${message.playerName}の時間切れ。CPUが代わりに操作しました`);
   } else if (message.type === 'match.cancelled' || message.type === 'room.left') {
     $('#matchmaking-status').classList.add('hidden');
     $('#online-lobby').classList.add('hidden');
@@ -816,13 +836,17 @@ function handleOnlineMessage(raw) {
   }
 }
 
-function updateOnlineLobby(roomId, players, maxPlayers, hostId, matchType = 'random') {
+function updateOnlineLobby(roomId, players, maxPlayers, hostId, passphrase, settings = {}) {
   onlineRoomHost = hostId === data.onlineSession.playerId;
   $('#online-lobby').classList.remove('hidden');
-  $('#online-room-label').textContent = matchType === 'passphrase' ? '合言葉募集' : 'ランダム募集';
+  $('#online-room-label').textContent = '対戦待機中';
   $('#online-lobby').dataset.hostId = hostId || '';
   $('#online-lobby').dataset.roomId = roomId || '';
-  $('#online-room-status').textContent = `${players.map((player) => player.name).join('、')}　${players.length} / ${maxPlayers} 人${players.length >= 2 ? '。ホストは開始できます。' : '。対戦には2人以上必要です。'}`;
+  $('#lobby-passphrase').textContent = passphrase || roomId || '-----';
+  $('#online-room-status').textContent = `${players.map((player) => player.name).join('、')}　${players.length} / ${maxPlayers} 人${players.length >= maxPlayers ? '。満員です。' : '。参加者を待っています。'}`;
+  $('#turn-time-limit').value = String(settings.turnTimeSeconds ?? 60);
+  $('#fallback-difficulty').value = settings.cpuDifficulty || 'normal';
+  $('#lobby-rule-settings').disabled = !onlineRoomHost;
   $('#start-room').classList.toggle('hidden', !onlineRoomHost);
   $('#start-room').disabled = !onlineRoomHost || players.length < 2;
 }
@@ -852,6 +876,8 @@ function applyOnlineState(state) {
     deck: Array.from({ length: state.deckCount }, () => null),
     complete: state.status === 'complete',
     startedAt: state.startedAt || onlineStartedAt || Date.now(),
+    turnTimeSeconds: state.settings?.turnTimeSeconds || 0,
+    turnDeadline: state.turnDeadline || null,
     waste: [],
   };
   onlineStartedAt = game.startedAt;
@@ -866,6 +892,8 @@ function applyOnlineState(state) {
 }
 
 function finishOnlineGame() {
+  if (turnTimerInterval) clearInterval(turnTimerInterval);
+  turnTimerInterval = null;
   const ranked = [...game.players].sort((left, right) => left.score - right.score);
   const self = ranked.find((player) => player.id === data.onlineSession.playerId);
   const reward = 5 + (self?.place === 1 ? 15 : 0);
@@ -975,20 +1003,15 @@ $('#export-data').addEventListener('click', exportSaveData);
 $('#import-data').addEventListener('change', (event) => { if (event.target.files[0]) importSaveData(event.target.files[0]); event.target.value = ''; });
 $('#connect-button').addEventListener('click', connectOnline);
 $('#quick-match').addEventListener('click', () => sendOnlineMessage({ type: 'match.quick', name: data.profile.name }));
-$('#host-match-type').addEventListener('change', (event) => {
-  const needsPassphrase = event.target.value === 'passphrase';
-  $('#host-passphrase-field').classList.toggle('hidden', !needsPassphrase);
-  $('#host-passphrase').classList.toggle('hidden', !needsPassphrase);
-});
 $('#create-room').addEventListener('click', () => sendOnlineMessage({
   type: 'room.create',
   name: data.profile.name,
   maxPlayers: Number($('#online-player-count').value),
-  matchType: $('#host-match-type').value,
-  passphrase: $('#host-passphrase').value,
 }));
-$('#join-room-form').addEventListener('submit', (event) => { event.preventDefault(); sendOnlineMessage({ type: 'room.join', passphrase: $('#join-passphrase').value, name: data.profile.name }); });
+$('#join-room-form').addEventListener('submit', (event) => { event.preventDefault(); sendOnlineMessage({ type: 'room.join', passphrase: $('#join-passphrase').value.trim().toUpperCase(), name: data.profile.name }); });
 $('#cancel-match').addEventListener('click', () => sendOnlineMessage({ type: 'match.cancel' }));
+$('#turn-time-limit').addEventListener('change', sendRoomSettings);
+$('#fallback-difficulty').addEventListener('change', sendRoomSettings);
 $('#start-room').addEventListener('click', () => sendOnlineMessage({ type: 'room.start' }));
 $('#leave-room').addEventListener('click', () => {
   sendOnlineMessage({ type: 'room.leave' });
@@ -1000,12 +1023,23 @@ $('#leave-room').addEventListener('click', () => {
 });
 $('#copy-passphrase').addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText($('#lobby-passphrase').textContent.replace(/^合言葉: /, ''));
+    await navigator.clipboard.writeText($('#lobby-passphrase').textContent);
     showToast('合言葉をコピーしました');
   } catch {
     showToast('合言葉を画面から確認してください');
   }
 });
+
+function sendRoomSettings() {
+  if (!onlineRoomHost) return;
+  sendOnlineMessage({
+    type: 'room.settings',
+    settings: {
+      turnTimeSeconds: Number($('#turn-time-limit').value),
+      cpuDifficulty: $('#fallback-difficulty').value,
+    },
+  });
+}
 
 data.profile.name = normalizeName(data.profile.name || localStorage.getItem('fourcard-player-name'), 'Player 1');
 playerNameInput.value = data.profile.name;
