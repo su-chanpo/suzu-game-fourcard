@@ -13,6 +13,10 @@ npm run dev
 
 Wranglerが表示するローカルURLを開いてください。WorkerはWebアプリ、`/api/health`、WebSocket接続先の`/ws`を提供します。ブラウザー用ファイルだけが`dist/`へコピーされ、Workerのソースコードや設定ファイルは静的ファイルとして公開されません。
 
+## IssueとPull Request
+
+PRタイトル・本文・コメントなど、作業に関する出力は日本語で記載してください。Copilotの作業報告とPR本文の必須項目は[Copilot作業ルール](../.github/ISSUE_COPILOT_INSTRUCTION.md)、PR本文の記入欄は[Pull Requestテンプレート](../.github/pull_request_template.md)を参照してください。
+
 ## 手動でのデプロイ
 
 1. Cloudflareアカウントを作成するか、既存のアカウントにログインし、`npm install`で依存パッケージをインストールします。
