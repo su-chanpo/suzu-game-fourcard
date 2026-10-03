@@ -273,10 +273,15 @@ function renderTurnTimer() {
 
 function renderOpponents() {
   const viewerIndex = game.mode === 'local' ? game.current : game.mode === 'online' ? game.meIndex : 0;
-  $('#opponents').innerHTML = game.players.filter((_, index) => index !== viewerIndex).map((player) => {
+  $('#opponents').innerHTML = game.players.map((player, index) => ({ player, index })).filter(({ index }) => index !== viewerIndex).map(({ player, index }) => {
     const score = game.complete ? `<span class="opponent-score">${player.score} pt</span>` : '';
     const cards = player.cards.map(({ card, revealed }, index) => `<div class="opponent-card-slot"><span class="opponent-slot-number">0${index + 1}</span>${cardMarkup(card, !card || (!revealed && !game.complete))}<span class="opponent-slot-state">${revealed || game.complete ? 'OPEN' : 'HIDDEN'}</span></div>`).join('');
-    return `<div class="opponent"><div class="opponent-heading"><strong>${escapeHtml(player.name)}</strong>${score}</div><div class="opponent-card-row" aria-label="${escapeHtml(player.name)}の手札">${cards}</div></div>`;
+    const current = game.mode === 'online' && index === game.current;
+    const presence = game.mode === 'online'
+      ? `<span class="opponent-presence ${player.isCPU ? 'is-cpu' : player.connected === false ? 'is-disconnected' : 'is-online'}"><i aria-hidden="true"></i>${player.isCPU ? 'CPU操作' : player.connected === false ? '再接続中' : 'オンライン'}${current ? ' · 手番' : ''}</span>`
+      : '';
+    const avatar = player.isCPU ? '♟' : escapeHtml(player.name.trim().slice(0, 1) || '?');
+    return `<div class="opponent ${current ? 'is-current' : ''}"><div class="opponent-player"><span class="opponent-avatar ${player.isCPU ? 'is-cpu' : ''}" aria-hidden="true">${avatar}</span><div class="opponent-info"><div class="opponent-heading"><strong>${escapeHtml(player.name)}</strong>${score}</div>${presence}</div></div><div class="opponent-card-row" aria-label="${escapeHtml(player.name)}の手札">${cards}</div></div>`;
   }).join('');
 }
 
@@ -831,7 +836,6 @@ function handleOnlineMessage(raw) {
     $('#cancel-match').disabled = false;
     if (pendingInvitePassphrase) {
       $('#join-passphrase').value = pendingInvitePassphrase;
-      sendOnlineMessage({ type: 'room.join', passphrase: pendingInvitePassphrase, name: data.profile.name });
       pendingInvitePassphrase = '';
       const inviteUrl = new URL(location.href);
       inviteUrl.searchParams.delete('room');
@@ -875,6 +879,12 @@ function handleOnlineMessage(raw) {
   } else if (message.type === 'game.state') {
     applyOnlineState(message.state);
   } else if (message.type === 'connection.lost' || message.type === 'connection.cpu') {
+    const player = game?.mode === 'online' ? game.players.find((entry) => entry.id === message.playerId) : null;
+    if (player) {
+      player.connected = false;
+      if (message.type === 'connection.cpu') player.isCPU = true;
+      renderOpponents();
+    }
     showToast(message.message || 'プレイヤーの接続状態が変わりました');
   } else if (message.type === 'error') {
     busy = false;
