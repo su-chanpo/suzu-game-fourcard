@@ -1,15 +1,29 @@
 name: Feature request
 description: 新機能や改善を提案する
 title: "[Feature]: "
+labels:
+  - feature
 body:
   - type: markdown
     attributes:
-      value: 提案したい機能や改善について記入してください。
+      value: |
+        提案したい機能や改善について記入してください。
+
+        ### 自動化について
+        この Issue は GitHub Actions で検知されることがあります。
+        実装が完了して PR を出すときは、以下をこの Issue のコメントに具体的に書いてください。
+        - 何を追加・変更したか
+        - どのように実装したか
+        - 使い方
+        - 影響範囲
+        - テスト結果
+        - 必要ならスクリーンショットや補足
   - type: textarea
     id: problem
     attributes:
       label: 解決したい課題
       description: どのような課題や不便さを解決したいかを記入してください。
+      placeholder: 例: 毎回同じ操作を繰り返すのが大変
     validations:
       required: true
   - type: textarea
@@ -17,6 +31,7 @@ body:
     attributes:
       label: 提案する機能
       description: 希望する機能や動作を記入してください。
+      placeholder: 例: ワンクリックで設定を保存できるようにする
     validations:
       required: true
   - type: textarea
