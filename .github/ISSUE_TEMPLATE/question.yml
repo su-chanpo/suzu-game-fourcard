@@ -4,7 +4,17 @@ title: "[Question]: "
 body:
   - type: markdown
     attributes:
-      value: 質問の内容と、確認したことがあれば記入してください。
+      value: |
+        質問の内容と、確認したことがあれば記入してください。
+
+        ### Copilotへの依頼
+        @copilot このIssueの質問に回答してください。
+        できれば以下を含めて、わかりやすくコメントで整理してください。
+        - 何をすべきか
+        - 手順
+        - 注意点
+        - 必要ならサンプルコード
+        - 初心者向けの補足
   - type: textarea
     id: question
     attributes:
