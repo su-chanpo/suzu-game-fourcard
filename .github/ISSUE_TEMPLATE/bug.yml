@@ -1,13 +1,16 @@
 name: Bug report
 description: バグや不具合を報告する
 title: "[Bug]: "
+labels:
+  - bug
 body:
   - type: markdown
     attributes:
       value: |
         バグの内容をできるだけ詳しく記入してください。
 
-        ### 修正内容の共有について
+        ### 自動化について
+        この Issue は GitHub Actions で検知されることがあります。
         修正が完了して PR を出すときは、以下をこの Issue のコメントに具体的に書いてください。
         - どこを修正したか
         - どう直したか
@@ -19,6 +22,7 @@ body:
     attributes:
       label: 不具合の内容
       description: 何が起きたかを記入してください。
+      placeholder: 例: ボタンを押すと画面が真っ白になる
     validations:
       required: true
   - type: textarea
@@ -37,6 +41,7 @@ body:
     attributes:
       label: 期待する動作
       description: 本来どのように動作するべきかを記入してください。
+      placeholder: 例: 画面が正しく表示される
     validations:
       required: true
   - type: textarea
@@ -44,5 +49,6 @@ body:
     attributes:
       label: 環境
       description: 使用しているブラウザーや端末などを記入してください。
+      placeholder: 例: Chrome / Windows 11
     validations:
       required: false
