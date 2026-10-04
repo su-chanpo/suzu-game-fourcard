@@ -185,7 +185,7 @@ export class GameHub {
     if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 4) throw new Error('プレイヤー人数は2〜4人で指定してください。');
     let roomId = this.randomRoomCode(5);
     while (rooms[roomId]) roomId = this.randomRoomCode(5);
-    const room = this.newRoom([{ id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, connected: true, turns: 0 }], roomId);
+    const room = this.newRoom([{ id: attachment.playerId, name: this.cleanName(message.name, 'Player'), isCPU: false, isBot: false, connected: true, turns: 0 }], roomId);
     room.maxPlayers = maxPlayers;
     room.hostId = attachment.playerId;
     room.matchType = 'random';
@@ -194,7 +194,7 @@ export class GameHub {
     let queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId && this.socketFor(entry.playerId) && !this.findPlayerRoom(rooms, entry.playerId));
     while (queue.length && room.players.length < room.maxPlayers) {
       const waitingPlayer = queue.shift();
-      room.players.push({ id: waitingPlayer.playerId, name: this.cleanName(waitingPlayer.name, 'Player'), isCPU: false, connected: true, turns: 0 });
+      room.players.push({ id: waitingPlayer.playerId, name: this.cleanName(waitingPlayer.name, 'Player'), isCPU: false, isBot: false, connected: true, turns: 0 });
     }
     rooms[room.id] = room;
     await this.ctx.storage.put('rooms', rooms);
@@ -237,7 +237,7 @@ export class GameHub {
 
   async addPlayerToRoom(ws, attachment, rooms, room, name) {
     if (room.status !== 'waiting' || room.players.length >= room.maxPlayers) throw new Error('この募集は満員か、すでに始まっています。');
-    room.players.push({ id: attachment.playerId, name: this.cleanName(name, 'Player'), isCPU: false, connected: true, turns: 0 });
+    room.players.push({ id: attachment.playerId, name: this.cleanName(name, 'Player'), isCPU: false, isBot: false, connected: true, turns: 0 });
     const queue = (await this.ctx.storage.get('queue') || []).filter((entry) => entry.playerId !== attachment.playerId);
     await this.ctx.storage.put('queue', queue);
     ws.serializeAttachment({ ...attachment, roomId: room.id });
@@ -254,7 +254,7 @@ export class GameHub {
     if (room.players.length < 2) throw new Error('対戦には2人以上必要です。');
     while (room.players.length < room.maxPlayers) {
       const cpuNumber = room.players.filter((player) => player.isCPU).length + 1;
-      room.players.push({ id: crypto.randomUUID(), name: `CPU ${cpuNumber}`, isCPU: true, connected: false, turns: 0 });
+      room.players.push({ id: crypto.randomUUID(), name: `CPU ${cpuNumber}`, isCPU: true, isBot: true, connected: false, turns: 0 });
     }
     this.startGame(room);
     await this.ctx.storage.put('rooms', rooms);
@@ -587,6 +587,7 @@ export class GameHub {
         id: entry.id,
         name: entry.name,
         isCPU: entry.isCPU,
+        isBot: entry.isBot ?? Boolean(entry.isCPU && /^CPU \d+$/.test(entry.name)),
         connected: entry.connected,
         turns: entry.turns,
         score: room.status === 'complete' ? entry.score : null,
