@@ -277,12 +277,14 @@ export class GameHub {
       if (slot.revealed) throw new Error('このカードはすでに公開されています。');
       slot.revealed = true;
     } else if (message.action === 'draw') {
+      if (slot.revealed) throw new Error('公開済みのカードは交換できません。');
       const drawn = this.draw(room);
       room.waste.push(room.discard);
       room.discard = slot.card;
       slot.card = drawn;
-      slot.revealed = false;
+      slot.revealed = true;
     } else if (message.action === 'discard') {
+      if (slot.revealed) throw new Error('公開済みのカードは交換できません。');
       const oldCard = slot.card;
       slot.card = room.discard;
       slot.revealed = true;
@@ -373,35 +375,35 @@ export class GameHub {
   playCpuTurn(room, player, difficulty) {
     const hidden = player.cards.map((slot, index) => !slot.revealed ? index : -1).filter((index) => index >= 0);
     const currentScore = this.score(player.cards);
-    const publicScores = player.cards.map((_, slotIndex) => this.score(player.cards.map((slot, cardIndex) => ({ ...slot, card: cardIndex === slotIndex ? room.discard : slot.card }))));
-    const bestPublicIndex = publicScores.indexOf(Math.min(...publicScores));
+    const publicScores = hidden.map((slotIndex) => ({ index: slotIndex, score: this.score(player.cards.map((slot, cardIndex) => ({ ...slot, card: cardIndex === slotIndex ? room.discard : slot.card }))) }));
+    const bestPublic = publicScores.reduce((best, target) => target.score < best.score ? target : best, publicScores[0]);
     let action = 'draw';
-    let index = player.cards.reduce((bestIndex, slot, slotIndex, cards) => slot.card.point > cards[bestIndex].card.point ? slotIndex : bestIndex, 0);
+    let index = hidden.reduce((bestIndex, slotIndex) => player.cards[slotIndex].card.point > player.cards[bestIndex].card.point ? slotIndex : bestIndex, hidden[0]);
 
     if (difficulty === 'easy') {
       const options = ['draw', 'discard', ...(hidden.length ? ['reveal'] : [])];
       action = options[Math.floor(Math.random() * options.length)];
-      index = action === 'reveal' ? hidden[Math.floor(Math.random() * hidden.length)] : Math.floor(Math.random() * player.cards.length);
+      index = hidden[Math.floor(Math.random() * hidden.length)];
     } else if (difficulty === 'normal') {
-      if (publicScores[bestPublicIndex] < currentScore) {
+      if (bestPublic.score < currentScore) {
         action = 'discard';
-        index = bestPublicIndex;
+        index = bestPublic.index;
       } else if (hidden.length && Math.random() < 0.3) {
         action = 'reveal';
         index = hidden[Math.floor(Math.random() * hidden.length)];
       }
     } else {
       const candidates = room.deck.length ? room.deck : room.waste;
-      const expectedScores = player.cards.map((_, slotIndex) => candidates.length
+      const expectedScores = hidden.map((slotIndex) => ({ index: slotIndex, score: candidates.length
         ? candidates.reduce((total, card) => total + this.score(player.cards.map((slot, cardIndex) => ({ ...slot, card: cardIndex === slotIndex ? card : slot.card }))), 0) / candidates.length
-        : currentScore);
-      const bestDrawIndex = expectedScores.indexOf(Math.min(...expectedScores));
-      if (publicScores[bestPublicIndex] <= expectedScores[bestDrawIndex]) {
+        : currentScore }));
+      const bestDraw = expectedScores.reduce((best, target) => target.score < best.score ? target : best, expectedScores[0]);
+      if (bestPublic.score <= bestDraw.score) {
         action = 'discard';
-        index = bestPublicIndex;
+        index = bestPublic.index;
       } else {
         action = 'draw';
-        index = bestDrawIndex;
+        index = bestDraw.index;
       }
       if (difficulty === 'expert' && hidden.length && Math.random() < 0.15) {
         action = 'reveal';
@@ -422,7 +424,7 @@ export class GameHub {
       room.waste.push(room.discard);
       room.discard = slot.card;
       slot.card = drawn;
-      slot.revealed = false;
+      slot.revealed = true;
     }
     player.turns += 1;
     room.lastAction = { playerId: player.id, action, index, automatic: true };

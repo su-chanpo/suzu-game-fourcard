@@ -27,9 +27,9 @@ const TUTORIAL_STEPS = [
   ['4枚のカードを整えよう', '4枚のカードの合計点を低くするゲームです。プレイヤー全員が4回ずつ行動し、最後に最も低い点数の人が勝ちます。'],
   ['カードの点数', 'Aは1点、2〜10は数字どおり、JとKは0点、Qは12点です。点数の高いカードを交換して、手札を小さくしましょう。'],
   ['ペアは0点', '同じランクのカード2枚はペアになり、2枚とも0点です。3枚なら2枚がペアになり、残り1枚分だけ点数が加算されます。'],
-  ['カードを開く', '裏向きのカードを1枚選んで公開できます。情報を確認できますが、そのターンは交換できません。'],
-  ['山札と交換', '手札を1枚選び、山札から引いたカードと交換します。引いたカードは交換が終わるまで見えません。'],
-  ['公開カードと交換', '場の公開カードと手札を交換できます。交換後のカードは公開され、次の人が取れるようになります。'],
+  ['カードを開く', '裏向きのカードを1枚選んで公開できます。公開したカードは以後交換できません。'],
+  ['山札と交換', '未公開の手札を1枚選び、山札から引いたカードと交換します。交換後のカードは全員に公開されます。'],
+  ['公開カードと交換', '未公開の手札を場の公開カードと交換します。交換後のカードは全員に公開され、以後交換できません。'],
   ['ゲーム終了と得点', '各プレイヤーが4回行動すると全カードが公開されます。ペアを0点として計算し、同点は同じ順位になります。'],
 ];
 const $ = (selector) => document.querySelector(selector);
@@ -217,9 +217,12 @@ function cardMarkup(card, back = false) {
 }
 
 function createCardFlight(source) {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
   const sourceCard = source === 'deck' ? $('#draw-pile') : $('#discard-pile .playing-card');
-  if (!sourceCard) return null;
+  return createCardFlightFrom(sourceCard);
+}
+
+function createCardFlightFrom(sourceCard) {
+  if (!sourceCard || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
   const bounds = sourceCard.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return null;
   const flight = sourceCard.cloneNode(true);
@@ -419,11 +422,12 @@ function renderHand() {
   handGrid.innerHTML = player.cards.map((slot, index) => {
     const ownerPrivate = Boolean(slot.private) || (index >= 2 && game.mode !== 'online' && !slot.revealed);
     const visible = Boolean(slot.card) && (slot.revealed || ownerPrivate || game.complete);
-    const selectable = isHumanTurn && selectedAction && (selectedAction !== 'reveal' || !slot.revealed);
+    const selectable = isHumanTurn && selectedAction && !slot.revealed;
     const selected = Boolean(selectable && selectedAction === 'reveal' && !slot.revealed);
     const card = visible ? cardMarkup(slot.card) : cardMarkup(null, true);
-    const state = slot.revealed ? 'OPEN' : ownerPrivate ? 'PRIVATE' : 'HIDDEN';
-    return `<button class="hand-slot ${selectable ? 'is-selectable' : ''} ${selected ? 'is-selected' : ''} ${ownerPrivate && !slot.revealed ? 'is-private' : ''}" type="button" data-slot="${index}" ${selectable ? '' : 'disabled'} aria-label="${index + 1}番のカード、${visible ? `${slot.card.rank}${slot.card.suit}${ownerPrivate && !slot.revealed ? '、自分だけに表示' : ''}` : '裏向き'}"><span class="slot-number">0${index + 1}</span>${card}<span class="slot-state">${state}</span></button>`;
+    const state = slot.revealed ? '全員に公開' : ownerPrivate ? '自分だけ' : '未公開';
+    const visibility = slot.revealed ? '全員に公開' : ownerPrivate ? '自分だけに表示' : '未公開';
+    return `<button class="hand-slot ${selectable ? 'is-selectable' : ''} ${selected ? 'is-selected' : ''} ${slot.revealed ? 'is-revealed' : ''} ${ownerPrivate && !slot.revealed ? 'is-private' : ''}" type="button" data-slot="${index}" ${selectable ? '' : 'disabled'} aria-label="${index + 1}番のカード、${visible ? `${slot.card.rank}${slot.card.suit}、${visibility}` : `裏向き、${visibility}`}"><span class="slot-number">0${index + 1}</span>${card}<span class="slot-state">${state}</span></button>`;
   }).join('');
   handGrid.querySelectorAll('.hand-slot').forEach((button) => button.addEventListener('click', () => performAction(Number(button.dataset.slot))));
 }
@@ -439,13 +443,13 @@ function updateActionControls() {
     button.disabled = !humanTurn || (action === 'reveal' && !hasHidden);
   });
   $('#action-prompt').textContent = busy ? (game.mode === 'online' ? 'サーバーに送信中…' : 'CPUが考えています…') : selectedAction ? actionPrompt(selectedAction) : '今回の行動を選んでください';
-  $('#hand-hint').textContent = selectedAction ? 'カードをタップして確定' : '行動を選んでからカードをタップ';
+  $('#hand-hint').textContent = selectedAction ? '未公開カードをタップして確定' : '公開済みカードは交換できません';
 }
 
 function actionPrompt(action) {
   if (action === 'reveal') return '開きたい裏向きカードをタップ';
-  if (action === 'draw') return '山札と交換するカードをタップ';
-  return '公開カードと交換するカードをタップ';
+  if (action === 'draw') return '山札と交換する未公開カードをタップ';
+  return '公開札と交換する未公開カードをタップ';
 }
 
 function drawFromDeck() {
@@ -466,6 +470,10 @@ function performAction(slotIndex) {
   const player = game?.players[game.current];
   if (!player || busy || player.isCPU || game.complete || !selectedAction) return;
   const slot = player.cards[slotIndex];
+  if (selectedAction !== 'reveal' && slot.revealed) {
+    showToast('公開済みのカードは交換できません');
+    return;
+  }
   if (selectedAction === 'reveal' && slot.revealed) return;
   if (game.mode === 'online') {
     const action = selectedAction;
@@ -481,6 +489,7 @@ function performAction(slotIndex) {
     return;
   }
   let cardFlight = null;
+  let discardFlight = null;
   if (selectedAction === 'reveal') {
     slot.revealed = true;
     game.seen.add(slot.card.id);
@@ -489,13 +498,16 @@ function performAction(slotIndex) {
     const drawn = drawFromDeck();
     if (!drawn) return showToast('山札がありません');
     cardFlight = createCardFlight('deck');
+    discardFlight = createCardFlightFrom(findCardTarget(player.id, slotIndex));
     replaceDiscard(slot.card);
     slot.card = drawn;
-    slot.revealed = false;
+    slot.revealed = true;
+    game.seen.add(drawn.id);
     showToast('山札からカードを交換しました');
   } else {
     const oldCard = slot.card;
     cardFlight = createCardFlight('discard');
+    discardFlight = createCardFlightFrom(findCardTarget(player.id, slotIndex));
     slot.card = game.discard;
     slot.revealed = true;
     game.seen.add(slot.card.id);
@@ -506,6 +518,7 @@ function performAction(slotIndex) {
   selectedAction = null;
   finishTurn();
   animateCardFlight(cardFlight, findCardTarget(player.id, slotIndex));
+  animateCardFlight(discardFlight, $('#discard-pile .playing-card'));
 }
 
 function expectedScoreAfterReplacement(player, index, replacement) {
@@ -517,10 +530,10 @@ function chooseCpuMove(player) {
   if (game.difficulty === 'easy') {
     const options = ['draw', 'discard', ...(hiddenIndices.length ? ['reveal'] : [])];
     const action = options[Math.floor(Math.random() * options.length)];
-    return { action, index: action === 'reveal' ? hiddenIndices[Math.floor(Math.random() * hiddenIndices.length)] : Math.floor(Math.random() * 4) };
+    return { action, index: hiddenIndices[Math.floor(Math.random() * hiddenIndices.length)] };
   }
   const currentScore = calculateScore(player.cards);
-  const targets = player.cards.map((slot, index) => ({ index, publicScore: expectedScoreAfterReplacement(player, index, game.discard) }));
+  const targets = hiddenIndices.map((index) => ({ index, publicScore: expectedScoreAfterReplacement(player, index, game.discard) }));
   const bestPublic = targets.reduce((best, target) => target.publicScore < best.publicScore ? target : best, targets[0]);
   const excluded = new Set([...game.seen, ...player.cards.map((slot) => slot.card.id)]);
   const unknownCards = createDeck().filter((card) => !excluded.has(card.id));
@@ -542,6 +555,7 @@ function playCpuTurn() {
   const move = chooseCpuMove(player);
   const slot = player.cards[move.index];
   let cardFlight = null;
+  let discardFlight = null;
   if (move.action === 'reveal') {
     slot.revealed = true;
     game.seen.add(slot.card.id);
@@ -549,6 +563,7 @@ function playCpuTurn() {
   } else if (move.action === 'discard') {
     const oldCard = slot.card;
     cardFlight = createCardFlight('discard');
+    discardFlight = createCardFlightFrom(findCardTarget(player.id, move.index));
     slot.card = game.discard;
     slot.revealed = true;
     replaceDiscard(oldCard);
@@ -557,14 +572,17 @@ function playCpuTurn() {
     const drawn = drawFromDeck();
     if (drawn) {
       cardFlight = createCardFlight('deck');
+      discardFlight = createCardFlightFrom(findCardTarget(player.id, move.index));
       replaceDiscard(slot.card);
       slot.card = drawn;
-      slot.revealed = false;
+      slot.revealed = true;
+      game.seen.add(drawn.id);
     }
     showToast(`${player.name}が山札を交換しました`);
   }
   finishTurn();
   animateCardFlight(cardFlight, findCardTarget(player.id, move.index));
+  animateCardFlight(discardFlight, $('#discard-pile .playing-card'));
 }
 
 function finishTurn() {
@@ -1058,7 +1076,9 @@ function applyOnlineState(state) {
   const meIndex = state.players.findIndex((player) => player.id === data.onlineSession.playerId);
   if (meIndex < 0) return;
   const cardFlights = [];
+  const discardFlights = [];
   if (game?.mode === 'online' && game.id === state.roomId) {
+    const lastAction = state.lastAction;
     state.players.forEach((nextPlayer) => {
       const previousPlayer = game.players.find((player) => player.id === nextPlayer.id);
       if (!previousPlayer) return;
@@ -1068,6 +1088,10 @@ function applyOnlineState(state) {
         const source = game.discard?.id === incomingCard.id ? 'discard' : 'deck';
         const flight = createCardFlight(source);
         if (flight) cardFlights.push({ flight, playerId: nextPlayer.id, slotIndex });
+        if (lastAction?.playerId === nextPlayer.id && lastAction.index === slotIndex && ['draw', 'discard'].includes(lastAction.action)) {
+          const discardFlight = createCardFlightFrom(findCardTarget(nextPlayer.id, slotIndex));
+          if (discardFlight) discardFlights.push(discardFlight);
+        }
       });
     });
   }
@@ -1094,12 +1118,14 @@ function applyOnlineState(state) {
   selectedAction = null;
   if (game.complete) {
     cardFlights.forEach(({ flight }) => flight.remove());
+    discardFlights.forEach((flight) => flight.remove());
     if (!wasComplete) finishOnlineGame();
     return;
   }
   showView('game');
   renderGame();
   cardFlights.forEach(({ flight, playerId, slotIndex }) => animateCardFlight(flight, findCardTarget(playerId, slotIndex)));
+  discardFlights.forEach((flight) => animateCardFlight(flight, $('#discard-pile .playing-card')));
 }
 
 function finishOnlineGame() {

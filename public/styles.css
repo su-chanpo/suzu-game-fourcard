@@ -81,3 +81,8 @@ body.table-skin-casino .game-table{background-color:#542c31;background-image:rep
 @media(max-height:700px){.game-table .table-area .card-corner,.game-table .hand-slot .card-corner{font-size:12px}}
 .card-flight{pointer-events:none}
 .playing-card.is-card-arriving{opacity:0}
+.game-table .hand-slot .slot-state{right:auto;bottom:6px;left:50%;transform:translateX(-50%);padding:3px 6px;border-radius:999px;background:#dce9dd;color:#153c37;font:600 8px var(--sans);white-space:nowrap}
+.game-table .hand-slot.is-revealed{border-color:#94b59e;background:#e8f0e7}
+.game-table .hand-slot.is-private{border-color:#d0ad66;background:#d0ad6628}
+.game-table .hand-slot.is-private .slot-state{background:#f3dfaa;color:#594516}
+.game-table .hand-slot.is-revealed .slot-state{background:#c9dfce;color:#153c37}
