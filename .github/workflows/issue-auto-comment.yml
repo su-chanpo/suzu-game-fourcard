@@ -1,0 +1,107 @@
+name: Issue auto comment
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  issues: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
+    steps:
+      - name: Post issue guidance
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Invalid issue number." >&2
+            exit 1
+          fi
+          jq -e 'type == "array"' <<< "$ISSUE_LABELS" >/dev/null
+
+          issue_type=""
+          for candidate in bug feature question; do
+            if jq -e --arg label "$candidate" 'index($label) != null' <<< "$ISSUE_LABELS" >/dev/null; then
+              issue_type="$candidate"
+              break
+            fi
+          done
+
+          if [[ -z "$issue_type" ]]; then
+            title_lower="${ISSUE_TITLE,,}"
+            case "$title_lower" in
+              "[bug]"*) issue_type="bug" ;;
+              "[feature]"*) issue_type="feature" ;;
+              "[question]"*) issue_type="question" ;;
+            esac
+          fi
+
+          if [[ -z "$issue_type" ]]; then
+            echo "No supported issue label or title prefix; skipping."
+            exit 0
+          fi
+
+          marker="<!-- issue-auto-comment:${issue_type} -->"
+          case "$issue_type" in
+            bug)
+              comment="$marker
+          このIssueは不具合報告として受け付けました。
+          修正後にPRを出す際は、このIssueのコメントに変更内容・影響範囲・テスト内容と結果を具体的に記載してください。"
+              ;;
+            feature)
+              comment="$marker
+          このIssueは機能提案として受け付けました。
+          実装後にPRを出す際は、このIssueのコメントに変更内容・影響範囲・テスト内容と結果を具体的に記載してください。"
+              ;;
+            question)
+              comment="$marker
+          質問への回答に必要な手順や注意点を具体的に説明してください。"
+              ;;
+          *)
+            echo "Unexpected issue type: $issue_type" >&2
+            exit 1
+            ;;
+          esac
+
+          api_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments"
+          page=1
+          while true; do
+            comments=$(curl --fail-with-body --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${api_url}?per_page=100&page=${page}")
+
+            if jq -e --arg marker "$marker" 'any(.[]; ((.body // "") | contains($marker)))' <<< "$comments" >/dev/null; then
+              echo "Guidance comment already exists; skipping."
+              exit 0
+            fi
+
+            comment_count=$(jq 'length' <<< "$comments")
+            if (( comment_count < 100 )); then
+              break
+            fi
+            page=$((page + 1))
+          done
+
+          payload=$(jq -n --arg body "$comment" '{body: $body}')
+          response=$(curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            --data "$payload" \
+            "$api_url")
+          echo "Posted $issue_type guidance: $(jq -r '.html_url' <<< "$response")"
