@@ -76,3 +76,6 @@ body.table-skin-casino .game-table{background-color:#542c31;background-image:rep
 .hand-slot .card-suit{font-size:18px}
 @media(max-width:700px){.table-area .card-corner{font-size:12px}.table-area .card-suit{font-size:22px}}
 @media(max-height:700px){.table-area .card-corner{font-size:10px}.table-area .card-suit{font-size:19px}.hand-slot .card-corner{font-size:9px}.hand-slot .card-suit{font-size:18px}}
+.game-table .table-area .card-corner,.game-table .hand-slot .card-corner{font-size:14px;font-weight:700}
+@media(max-width:700px){.game-table .table-area .card-corner{font-size:15px}.game-table .hand-slot .card-corner{font-size:14px}}
+@media(max-height:700px){.game-table .table-area .card-corner,.game-table .hand-slot .card-corner{font-size:12px}}
