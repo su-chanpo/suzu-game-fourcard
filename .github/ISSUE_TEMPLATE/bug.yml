@@ -4,7 +4,16 @@ title: "[Bug]: "
 body:
   - type: markdown
     attributes:
-      value: バグの内容をできるだけ詳しく記入してください。
+      value: |
+        バグの内容をできるだけ詳しく記入してください。
+
+        ### 修正内容の共有について
+        修正が完了して PR を出すときは、以下をこの Issue のコメントに具体的に書いてください。
+        - どこを修正したか
+        - どう直したか
+        - 影響範囲
+        - テスト結果
+        - 必要ならスクリーンショットや補足
   - type: textarea
     id: bug-description
     attributes:
