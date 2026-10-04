@@ -45,14 +45,11 @@
               <p class="setup-mode-label" id="setup-mode-label">CPU対戦</p>
               <label class="field-label" for="player-name">あなたの名前</label><input class="text-input" id="player-name" name="playerName" maxlength="12" autocomplete="nickname" placeholder="Player 1" />
               <div class="field-row" id="setup-fields-row"><div class="field-unit"><label class="field-label" for="player-count">プレイヤー数</label><select class="select-input" id="player-count" name="playerCount"><option value="2">2人</option><option value="3">3人</option><option value="4" selected>4人</option></select></div><div class="field-unit" id="difficulty-field"><label class="field-label" for="difficulty">CPUの強さ</label><select class="select-input" id="difficulty" name="difficulty"><option value="easy">EASY</option><option value="normal" selected>NORMAL</option><option value="hard">HARD</option><option value="expert">EXPERT</option></select></div></div>
-              <div class="local-name-fields hidden" id="local-name-fields"></div>
               <button class="primary-button" type="submit"><span>ゲームを始める</span><span class="button-arrow" aria-hidden="true">↗</span></button><p class="form-footnote"><span class="status-dot"></span> オフラインですぐに遊べます</p>
             </form>
           </div>
           <div class="setup-bottom"><span>01 — 03</span><span>SHUFFLE · EXCHANGE · WIN</span></div>
         </section>
-
-        <section class="screen handoff-screen hidden" id="handoff-screen" aria-labelledby="handoff-title"><p class="eyebrow">PASS THE DEVICE</p><div class="handoff-mark" aria-hidden="true">◉</div><h1 id="handoff-title">次のプレイヤーへ</h1><p id="handoff-message">画面をほかの人から隠してから進んでください。</p><button class="primary-button handoff-button" id="handoff-continue" type="button"><span>準備できました</span><span class="button-arrow">→</span></button><button class="plain-link" id="handoff-quit" type="button">ゲームを終了する</button></section>
 
         <section class="screen online-screen hidden" id="online-screen" aria-labelledby="online-title">
           <button class="back-link" type="button" data-view="home">← ホーム</button>

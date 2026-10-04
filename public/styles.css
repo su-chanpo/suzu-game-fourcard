@@ -79,3 +79,5 @@ body.table-skin-casino .game-table{background-color:#542c31;background-image:rep
 .game-table .table-area .card-corner,.game-table .hand-slot .card-corner{font-size:14px;font-weight:700}
 @media(max-width:700px){.game-table .table-area .card-corner{font-size:15px}.game-table .hand-slot .card-corner{font-size:14px}}
 @media(max-height:700px){.game-table .table-area .card-corner,.game-table .hand-slot .card-corner{font-size:12px}}
+.card-flight{pointer-events:none}
+.playing-card.is-card-arriving{opacity:0}
