@@ -22,7 +22,7 @@ body:
     attributes:
       label: 質問
       description: 知りたいことを具体的に記入してください。
-      placeholder: 例: Google AdSense の登録手順を知りたい
+      placeholder: "例: Google AdSense の登録手順を知りたい"
     validations:
       required: true
   - type: textarea

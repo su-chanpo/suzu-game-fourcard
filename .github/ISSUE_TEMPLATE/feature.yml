@@ -2,7 +2,7 @@ name: Feature request
 description: 新機能や改善を提案する
 title: "[Feature]: "
 labels:
-  - feature
+  - enhancement
 body:
   - type: markdown
     attributes:
@@ -23,7 +23,7 @@ body:
     attributes:
       label: 解決したい課題
       description: どのような課題や不便さを解決したいかを記入してください。
-      placeholder: 例: 毎回同じ操作を繰り返すのが大変
+      placeholder: "例: 毎回同じ操作を繰り返すのが大変"
     validations:
       required: true
   - type: textarea
@@ -31,7 +31,7 @@ body:
     attributes:
       label: 提案する機能
       description: 希望する機能や動作を記入してください。
-      placeholder: 例: ワンクリックで設定を保存できるようにする
+      placeholder: "例: ワンクリックで設定を保存できるようにする"
     validations:
       required: true
   - type: textarea

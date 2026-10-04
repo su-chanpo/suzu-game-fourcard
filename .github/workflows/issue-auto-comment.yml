@@ -38,6 +38,10 @@ jobs:
             fi
           done
 
+          if [[ -z "$issue_type" ]] && jq -e 'index("enhancement") != null' <<< "$ISSUE_LABELS" >/dev/null; then
+            issue_type="feature"
+          fi
+
           if [[ -z "$issue_type" ]]; then
             title_lower="${ISSUE_TITLE,,}"
             case "$title_lower" in
