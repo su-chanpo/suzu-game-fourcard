@@ -32,6 +32,8 @@ body.card-skin-dark .playing-card:not(.card-back){background:#263b37;color:#f4f1
 .game-table .opponent-heading strong{color:inherit}
 .game-table .opponent-presence{color:#d0ddd3}
 .game-table .opponent-presence i{background:#a9d3a2}
+.game-table .opponent-public-score{display:block;margin-top:2px;color:var(--gold);font:8px var(--mono);white-space:nowrap}
+.card-back:after,.opponents .card-back:after{content:none;display:none}
 .game-table .opponent-presence.is-cpu i{background:#e0c476}
 .game-table .opponent-presence.is-disconnected i{background:#ed9888}
 .game-table .hand-heading h2{color:#fffdf7}

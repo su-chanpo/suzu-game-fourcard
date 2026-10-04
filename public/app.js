@@ -411,6 +411,12 @@ function renderOpponents() {
       score.className = 'opponent-score';
       score.textContent = `${player.score} pt`;
       heading.append(score);
+    } else {
+      const publicCards = player.cards.filter(({ card, revealed }) => revealed && card);
+      const publicScore = document.createElement('span');
+      publicScore.className = 'opponent-public-score';
+      publicScore.textContent = `公開分 ${calculateScore(publicCards)} PT`;
+      heading.append(publicScore);
     }
     info.append(heading);
     if (game.mode === 'online') {

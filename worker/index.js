@@ -523,6 +523,9 @@ export class GameHub {
       if (room.status === 'playing' && room.turnDeadline && !room.players[room.current]?.isCPU) {
         nextAlarm = Math.min(nextAlarm, room.turnDeadline);
       }
+      if (room.status === 'playing' && room.cpuDeadline && room.players[room.current]?.isCPU) {
+        nextAlarm = Math.min(nextAlarm, room.cpuDeadline);
+      }
       if (room.status === 'complete') {
         nextAlarm = Math.min(nextAlarm, (room.completedAt || Date.now()) + COMPLETE_ROOM_CLEANUP_MS);
       }
