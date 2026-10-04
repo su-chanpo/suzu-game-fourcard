@@ -37,7 +37,6 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const setupScreen = $('#setup-screen');
 const gameScreen = $('#game-screen');
 const resultScreen = $('#result-screen');
-const handoffScreen = $('#handoff-screen');
 const setupForm = $('#setup-form');
 const playerNameInput = $('#player-name');
 const playerCountInput = $('#player-count');
@@ -100,7 +99,6 @@ let busy = false;
 let toastTimer = null;
 let cpuTimer = null;
 let turnTimerInterval = null;
-let setupMode = 'cpu';
 let tutorialIndex = 0;
 let tutorialReturnView = 'home';
 let rankingPeriod = 'daily';
@@ -129,11 +127,11 @@ function saveData() {
 function showView(view, updateUrl = true, scrollToTop = true) {
   const path = PAGE_PATHS[view];
   if (updateUrl && path && location.pathname !== path) history.pushState(null, '', `${path}${location.search}`);
-  const ids = ['home-screen', 'play-screen', 'setup-screen', 'online-screen', 'rankings-screen', 'stats-screen', 'skins-screen', 'settings-screen', 'tutorial-screen', 'game-screen', 'result-screen', 'handoff-screen'];
+  const ids = ['home-screen', 'play-screen', 'setup-screen', 'online-screen', 'rankings-screen', 'stats-screen', 'skins-screen', 'settings-screen', 'tutorial-screen', 'game-screen', 'result-screen'];
   const currentView = ids.find((id) => !$(`#${id}`).classList.contains('hidden'));
   const viewChanged = currentView !== `${view}-screen`;
   ids.forEach((id) => $(`#${id}`).classList.toggle('hidden', id !== `${view}-screen`));
-  document.body.classList.toggle('in-game', view === 'game' || view === 'handoff');
+  document.body.classList.toggle('in-game', view === 'game');
   if (view === 'home') renderHome();
   if (view === 'rankings') renderRankings();
   if (view === 'stats') renderStats();
@@ -168,37 +166,21 @@ function calculateScore(cards) {
   }, 0);
 }
 
-function beginSetup(mode) {
-  setupMode = mode;
-  $('#setup-mode-label').textContent = mode === 'local' ? 'ローカル対戦' : 'CPU対戦';
-  $('#difficulty-field').classList.toggle('hidden', mode === 'local');
-  $('#local-name-fields').classList.toggle('hidden', mode !== 'local');
-  $('#setup-title').innerHTML = mode === 'local' ? 'ローカル<span>対戦</span>' : 'CPU<span>対戦</span>';
-  renderLocalNameInputs();
+function beginSetup() {
+  $('#setup-title').innerHTML = 'CPU<span>対戦</span>';
   showView('setup');
 }
 
-function renderLocalNameInputs() {
-  const container = $('#local-name-fields');
-  if (setupMode !== 'local') return;
-  const count = Number(playerCountInput.value);
-  const existing = [...container.querySelectorAll('input')].map((input) => input.value);
-  container.innerHTML = Array.from({ length: count - 1 }, (_, index) => {
-    const position = index + 2;
-    return `<label>プレイヤー ${position} の名前<input class="text-input local-player-name" maxlength="12" value="${escapeHtml(existing[index] || '')}" placeholder="Player ${position}" /></label>`;
-  }).join('');
-}
-
 function startGame() {
+  busy = false;
   const playerCount = Number(playerCountInput.value);
   const playerName = normalizeName(playerNameInput.value, 'Player 1');
   data.profile.name = playerName;
   saveData();
-  const localNames = $$('.local-player-name').map((input, index) => normalizeName(input.value, `Player ${index + 2}`));
   const players = Array.from({ length: playerCount }, (_, index) => ({
     id: index,
-    name: index === 0 ? playerName : setupMode === 'local' ? localNames[index - 1] : `CPU ${index}`,
-    isCPU: setupMode === 'cpu' && index !== 0,
+    name: index === 0 ? playerName : `CPU ${index}`,
+    isCPU: index !== 0,
     cards: [],
     turns: 0,
     score: null,
@@ -208,7 +190,7 @@ function startGame() {
   const discard = deck.pop();
   game = {
     id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-    mode: setupMode,
+    mode: 'cpu',
     players,
     deck,
     discard,
@@ -221,12 +203,9 @@ function startGame() {
   };
   selectedAction = null;
   busy = false;
-  if (setupMode === 'local') showHandoff();
-  else {
-    showView('game');
-    renderGame();
-    scheduleCpuTurn();
-  }
+  showView('game');
+  renderGame();
+  scheduleCpuTurn();
 }
 
 function cardMarkup(card, back = false) {
@@ -237,12 +216,77 @@ function cardMarkup(card, back = false) {
   return `<div class="playing-card ${color}" aria-label="${rank}${suit}"><span class="card-corner">${rank}<br>${suit}</span><span class="card-suit">${suit}</span><span class="card-corner card-corner-bottom">${rank}<br>${suit}</span></div>`;
 }
 
+function createCardFlight(source) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
+  const sourceCard = source === 'deck' ? $('#draw-pile') : $('#discard-pile .playing-card');
+  if (!sourceCard) return null;
+  const bounds = sourceCard.getBoundingClientRect();
+  if (!bounds.width || !bounds.height) return null;
+  const flight = sourceCard.cloneNode(true);
+  flight.classList.add('card-flight');
+  flight.removeAttribute('id');
+  flight.setAttribute('aria-hidden', 'true');
+  flight.style.position = 'fixed';
+  flight.style.left = `${bounds.left}px`;
+  flight.style.top = `${bounds.top}px`;
+  flight.style.width = `${bounds.width}px`;
+  flight.style.height = `${bounds.height}px`;
+  flight.style.margin = '0';
+  flight.style.transform = 'none';
+  flight.style.transformOrigin = 'center';
+  flight.style.zIndex = '1200';
+  flight.style.pointerEvents = 'none';
+  if (flight instanceof HTMLButtonElement) flight.disabled = true;
+  document.body.append(flight);
+  return flight;
+}
+
+function animateCardFlight(flight, target) {
+  if (!flight) return;
+  if (!target?.isConnected) {
+    flight.remove();
+    return;
+  }
+  const start = flight.getBoundingClientRect();
+  const end = target.getBoundingClientRect();
+  if (!end.width || !end.height) {
+    flight.remove();
+    return;
+  }
+  const translateX = end.left + end.width / 2 - (start.left + start.width / 2);
+  const translateY = end.top + end.height / 2 - (start.top + start.height / 2);
+  const scaleX = target.offsetWidth / start.width;
+  const scaleY = target.offsetHeight / start.height;
+  const rotation = target.closest('.seat-left') ? -90 : target.closest('.seat-right') ? 90 : 0;
+  target.classList.add('is-card-arriving');
+  const animation = flight.animate([
+    { transform: 'translate(0,0) scale(1) rotate(0)', opacity: 1 },
+    { transform: `translate(${translateX}px,${translateY}px) scale(${scaleX},${scaleY}) rotate(${rotation}deg)`, opacity: 1 },
+  ], { duration: 540, easing: 'cubic-bezier(.2,.75,.3,1)', fill: 'forwards' });
+  const cleanup = () => {
+    flight.remove();
+    target.classList.remove('is-card-arriving');
+  };
+  animation.addEventListener('finish', cleanup, { once: true });
+  animation.addEventListener('cancel', cleanup, { once: true });
+  window.setTimeout(cleanup, 800);
+}
+
+function findCardTarget(playerId, slotIndex) {
+  const viewerIndex = game.mode === 'online' ? game.meIndex : 0;
+  if (String(game.players[viewerIndex]?.id) === String(playerId)) {
+    return handGrid.querySelector(`.hand-slot[data-slot="${slotIndex}"] .playing-card`);
+  }
+  const opponentSlot = $$('.opponent-card-slot').find((slot) => slot.dataset.playerId === String(playerId) && slot.dataset.cardIndex === String(slotIndex));
+  return opponentSlot?.querySelector('.playing-card') || null;
+}
+
 function renderGame() {
   if (!game) return;
   const currentPlayer = game.players[game.current];
   $('#round-label').textContent = `ROUND ${String(currentPlayer.turns + 1).padStart(2, '0')} / 04`;
   renderTurnTimer();
-  $('#game-title').textContent = currentPlayer.isCPU ? `${currentPlayer.name}のターン` : game.mode === 'local' ? `${currentPlayer.name}のターン` : game.mode === 'online' && game.current !== game.meIndex ? `${currentPlayer.name}のターン` : 'あなたのターン';
+  $('#game-title').textContent = currentPlayer.isCPU || (game.mode === 'online' && game.current !== game.meIndex) ? `${currentPlayer.name}のターン` : 'あなたのターン';
   $('#deck-count').textContent = String(game.deck.length).padStart(2, '0');
   $('#discard-pile').innerHTML = game.discard ? cardMarkup(game.discard) : '';
   $('#draw-pile').disabled = game.mode === 'online' && (game.current !== game.meIndex || busy || game.complete);
@@ -277,7 +321,7 @@ function renderTurnTimer() {
 }
 
 function renderOpponents() {
-  const viewerIndex = game.mode === 'local' ? game.current : game.mode === 'online' ? game.meIndex : 0;
+  const viewerIndex = game.mode === 'online' ? game.meIndex : 0;
   const seats = {
     top: $('#seat-top'),
     left: $('#seat-left'),
@@ -329,6 +373,8 @@ function renderOpponents() {
     player.cards.forEach(({ card, revealed }, cardIndex) => {
       const slot = document.createElement('div');
       slot.className = 'opponent-card-slot';
+      slot.dataset.playerId = String(player.id);
+      slot.dataset.cardIndex = String(cardIndex);
       const number = document.createElement('span');
       number.className = 'opponent-slot-number';
       number.textContent = `0${cardIndex + 1}`;
@@ -364,14 +410,14 @@ function renderOpponents() {
 }
 
 function renderHand() {
-  const handPlayerIndex = game.mode === 'local' ? game.current : game.mode === 'online' ? game.meIndex : 0;
+  const handPlayerIndex = game.mode === 'online' ? game.meIndex : 0;
   const player = game.players[handPlayerIndex];
   const isHumanTurn = game.current === handPlayerIndex && !player.isCPU && !busy && !game.complete;
   const hasAllCards = player.cards.every((slot) => slot.card);
   const score = hasAllCards ? calculateScore(player.cards) : null;
   $('#hand-title').innerHTML = `${escapeHtml(player.name)} のカード <span id="hand-score">${score === null ? '???' : `${score} PT`}</span>`;
   handGrid.innerHTML = player.cards.map((slot, index) => {
-    const ownerPrivate = Boolean(slot.private) || (index >= 2 && game.mode !== 'local' && !slot.revealed && game.mode !== 'online');
+    const ownerPrivate = Boolean(slot.private) || (index >= 2 && game.mode !== 'online' && !slot.revealed);
     const visible = Boolean(slot.card) && (slot.revealed || ownerPrivate || game.complete);
     const selectable = isHumanTurn && selectedAction && (selectedAction !== 'reveal' || !slot.revealed);
     const selected = Boolean(selectable && selectedAction === 'reveal' && !slot.revealed);
@@ -434,6 +480,7 @@ function performAction(slotIndex) {
     }
     return;
   }
+  let cardFlight = null;
   if (selectedAction === 'reveal') {
     slot.revealed = true;
     game.seen.add(slot.card.id);
@@ -441,12 +488,14 @@ function performAction(slotIndex) {
   } else if (selectedAction === 'draw') {
     const drawn = drawFromDeck();
     if (!drawn) return showToast('山札がありません');
+    cardFlight = createCardFlight('deck');
     replaceDiscard(slot.card);
     slot.card = drawn;
     slot.revealed = false;
     showToast('山札からカードを交換しました');
   } else {
     const oldCard = slot.card;
+    cardFlight = createCardFlight('discard');
     slot.card = game.discard;
     slot.revealed = true;
     game.seen.add(slot.card.id);
@@ -456,6 +505,7 @@ function performAction(slotIndex) {
   playEffect('card');
   selectedAction = null;
   finishTurn();
+  animateCardFlight(cardFlight, findCardTarget(player.id, slotIndex));
 }
 
 function expectedScoreAfterReplacement(player, index, replacement) {
@@ -491,12 +541,14 @@ function playCpuTurn() {
   const player = game.players[game.current];
   const move = chooseCpuMove(player);
   const slot = player.cards[move.index];
+  let cardFlight = null;
   if (move.action === 'reveal') {
     slot.revealed = true;
     game.seen.add(slot.card.id);
     showToast(`${player.name}がカードを開きました`);
   } else if (move.action === 'discard') {
     const oldCard = slot.card;
+    cardFlight = createCardFlight('discard');
     slot.card = game.discard;
     slot.revealed = true;
     replaceDiscard(oldCard);
@@ -504,6 +556,7 @@ function playCpuTurn() {
   } else {
     const drawn = drawFromDeck();
     if (drawn) {
+      cardFlight = createCardFlight('deck');
       replaceDiscard(slot.card);
       slot.card = drawn;
       slot.revealed = false;
@@ -511,6 +564,7 @@ function playCpuTurn() {
     showToast(`${player.name}が山札を交換しました`);
   }
   finishTurn();
+  animateCardFlight(cardFlight, findCardTarget(player.id, move.index));
 }
 
 function finishTurn() {
@@ -518,18 +572,9 @@ function finishTurn() {
   if (game.players.every((player) => player.turns >= 4)) return endGame();
   game.current = (game.current + 1) % game.players.length;
   selectedAction = null;
-  if (game.mode === 'local' && !game.players[game.current].isCPU) return showHandoff();
   showView('game');
   renderGame();
   scheduleCpuTurn();
-}
-
-function showHandoff() {
-  clearTimeout(cpuTimer);
-  const player = game.players[game.current];
-  $('#handoff-title').textContent = `${player.name}の番です`;
-  $('#handoff-message').textContent = 'ほかのプレイヤーに画面を見られないよう端末を渡し、準備ができたら進んでください。';
-  showView('handoff');
 }
 
 function scheduleCpuTurn() {
@@ -607,6 +652,7 @@ function getStats() {
 function getRankingEntries(period) {
   const now = new Date();
   const matches = data.history.filter((match) => {
+    if (match.mode === 'cpu') return false;
     const date = new Date(match.date);
     if (period === 'daily') return date.toDateString() === now.toDateString();
     if (period === 'weekly') return (now - date) / 86_400_000 < 7;
@@ -646,7 +692,8 @@ function renderStats() {
   $('#history-count').textContent = `${stats.games} GAMES`;
   $('#history-list').innerHTML = data.history.length ? data.history.slice(0, 12).map((match) => {
     const self = match.players?.find((player) => player.isSelf);
-    return `<div class="history-row"><time>${new Date(match.date).toLocaleDateString('ja-JP')}</time><strong>${match.mode === 'local' ? 'ローカル' : 'CPU'}対戦</strong><span>${self?.place ?? '-'}位</span><span>${self?.score ?? '-'} pt</span></div>`;
+    const modeLabel = match.mode === 'online' ? 'オンライン' : match.mode === 'cpu' ? 'CPU' : '旧';
+    return `<div class="history-row"><time>${new Date(match.date).toLocaleDateString('ja-JP')}</time><strong>${modeLabel}対戦</strong><span>${self?.place ?? '-'}位</span><span>${self?.score ?? '-'} pt</span></div>`;
   }).join('') : '<div class="empty-state">対戦結果はここに保存されます。</div>';
 }
 
@@ -1010,6 +1057,20 @@ function applyOnlineState(state) {
   if (!state || !Array.isArray(state.players)) return;
   const meIndex = state.players.findIndex((player) => player.id === data.onlineSession.playerId);
   if (meIndex < 0) return;
+  const cardFlights = [];
+  if (game?.mode === 'online' && game.id === state.roomId) {
+    state.players.forEach((nextPlayer) => {
+      const previousPlayer = game.players.find((player) => player.id === nextPlayer.id);
+      if (!previousPlayer) return;
+      nextPlayer.cards.forEach((slot, slotIndex) => {
+        const incomingCard = fromServerCard(slot.card);
+        if (!incomingCard || incomingCard.id === previousPlayer.cards[slotIndex]?.card?.id) return;
+        const source = game.discard?.id === incomingCard.id ? 'discard' : 'deck';
+        const flight = createCardFlight(source);
+        if (flight) cardFlights.push({ flight, playerId: nextPlayer.id, slotIndex });
+      });
+    });
+  }
   const wasComplete = game?.mode === 'online' && game.complete;
   game = {
     id: state.roomId,
@@ -1032,11 +1093,13 @@ function applyOnlineState(state) {
   busy = false;
   selectedAction = null;
   if (game.complete) {
+    cardFlights.forEach(({ flight }) => flight.remove());
     if (!wasComplete) finishOnlineGame();
     return;
   }
   showView('game');
   renderGame();
+  cardFlights.forEach(({ flight, playerId, slotIndex }) => animateCardFlight(flight, findCardTarget(playerId, slotIndex)));
 }
 
 function finishOnlineGame() {
@@ -1123,9 +1186,8 @@ window.addEventListener('popstate', () => {
 $('#choose-create-room').addEventListener('click', () => showOnlinePanel('host'));
 $('#choose-join-room').addEventListener('click', () => showOnlinePanel('join'));
 $$('[data-online-back]').forEach((button) => button.addEventListener('click', () => showOnlinePanel('choices')));
-$$('[data-mode]').forEach((button) => button.addEventListener('click', () => beginSetup(button.dataset.mode)));
+$$('[data-mode]').forEach((button) => button.addEventListener('click', beginSetup));
 $$('[data-period]').forEach((button) => button.addEventListener('click', () => { rankingPeriod = button.dataset.period; renderRankings(); }));
-playerCountInput.addEventListener('change', renderLocalNameInputs);
 setupForm.addEventListener('submit', (event) => { event.preventDefault(); startGame(); });
 actionButtons.forEach((button) => button.addEventListener('click', () => {
   if (button.disabled || busy) return;
@@ -1133,8 +1195,6 @@ actionButtons.forEach((button) => button.addEventListener('click', () => {
   renderHand();
   updateActionControls();
 }));
-$('#handoff-continue').addEventListener('click', () => { showView('game'); renderGame(); });
-$('#handoff-quit').addEventListener('click', returnToHome);
 $('#rules-button').addEventListener('click', () => $('#rules-dialog').showModal());
 $('#quit-button').addEventListener('click', () => { if (window.confirm('このゲームを終了してホームへ戻りますか？')) returnToHome(); });
 $('#rematch-button').addEventListener('click', () => {
@@ -1259,7 +1319,6 @@ data.profile.name = normalizeName(data.profile.name || getStoredValue('fourcard-
 playerNameInput.value = data.profile.name;
 applySkins();
 renderHome();
-renderLocalNameInputs();
 if (data.settings.bgm) setBgm(true);
 if (data.settings.notifications && 'Notification' in window && Notification.permission === 'granted' && data.lastDailyBonus !== new Date().toISOString().slice(0, 10)) {
   new Notification('フォーカード', { body: '今日のデイリーボーナスを受け取れます。' });
