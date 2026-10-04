@@ -39,6 +39,10 @@ GitHub Actionsの実行環境にはNode.js 20とWranglerが用意されるため
 
 Durable ObjectのSQLiteストレージは、`wrangler.toml`に記載した`v1`マイグレーションで作成します。初回デプロイ時に`GameHub`クラスが作成されます。デプロイ後にクラス名を変更したりマイグレーション設定を削除したりする場合は、事前にDurable Objectの移行計画を立ててください。
 
+## Google AdSense
+
+AdSenseの登録、サイト審査、広告コードと`ads.txt`の設置については[Google AdSenseの導入ガイド](GOOGLE_ADSENSE.md)を参照してください。現状は広告連携と独自ドメインが未設定です。
+
 ## WebSocketプロトコル
 
 メッセージはJSON形式です。最初に`session.join`を送信してください。サーバーは`session.ready`とゲスト用の再接続トークンを返します。
