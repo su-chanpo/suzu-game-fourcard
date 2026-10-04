@@ -6,7 +6,8 @@ const RANKS = [
 const ROOM_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const MAX_MESSAGE_BYTES = 4096;
 const RECONNECT_GRACE_MS = 30_000;
-const COMPLETE_ROOM_CLEANUP_MS = 30_000;
+const COMPLETE_ROOM_CLEANUP_MS = 5 * 60_000;
+const CPU_THINK_TIME_MS = 1_000;
 
 function jsonResponse(value, status = 200) {
   return Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -54,6 +55,7 @@ export class GameHub {
       if (message.type === 'room.settings') return await this.updateRoomSettings(ws, attachment, message);
       if (message.type === 'room.start') return await this.startRoom(ws, attachment);
       if (message.type === 'game.action') return await this.gameAction(ws, attachment, message);
+      if (message.type === 'game.rematch') return await this.requestRematch(ws, attachment);
       if (message.type === 'room.leave') return await this.leaveRoom(ws, attachment);
       throw new Error('未対応の操作です。');
     } catch (error) {
@@ -90,15 +92,20 @@ export class GameHub {
       }
       if (room.status === 'playing') {
         if (room.players[room.current]?.isCPU) {
-          await this.runDisconnectedCpu(room);
+          if (!room.cpuDeadline) room.cpuDeadline = now + CPU_THINK_TIME_MS;
+          if (room.cpuDeadline <= now) {
+            this.playCpuTurn(room, room.players[room.current], room.settings?.cpuDifficulty || 'normal');
+            this.broadcastState(room);
+          }
         } else if (room.turnDeadline && room.turnDeadline <= now) {
           const player = room.players[room.current];
           this.playCpuTurn(room, player, room.settings?.cpuDifficulty || 'normal');
           this.broadcastRoom(room, { type: 'turn.timeout', playerName: player.name });
-          if (room.status === 'playing' && room.players[room.current]?.isCPU) await this.runDisconnectedCpu(room);
-          else this.broadcastState(room);
+          this.broadcastState(room);
         }
+        if (room.status === 'playing' && room.players[room.current]?.isCPU && !room.cpuDeadline) room.cpuDeadline = now + CPU_THINK_TIME_MS;
         if (room.turnDeadline && !room.players[room.current]?.isCPU) nextAlarm = Math.min(nextAlarm, room.turnDeadline);
+        if (room.cpuDeadline && room.players[room.current]?.isCPU) nextAlarm = Math.min(nextAlarm, room.cpuDeadline);
       }
     }
     nextAlarm = Math.min(nextAlarm, this.cleanupCompleteRoom(rooms, now));
@@ -137,6 +144,7 @@ export class GameHub {
       player.name = name || player.name;
       if (player.isCPU && player.name.endsWith(' (CPU)')) player.name = player.name.slice(0, -6);
       player.isCPU = false;
+      if (room.status === 'playing' && room.players[room.current]?.id === player.id) room.cpuDeadline = null;
       await this.ctx.storage.put('rooms', rooms);
     }
     this.send(ws, { type: 'session.ready', playerId, resumeToken: token });
@@ -255,6 +263,62 @@ export class GameHub {
     this.broadcastState(room);
   }
 
+  async requestRematch(ws, attachment) {
+    const rooms = await this.ctx.storage.get('rooms') || {};
+    const room = rooms[attachment.roomId];
+    if (!room || room.status !== 'complete') throw new Error('再戦できる対戦がありません。');
+    const player = room.players.find((entry) => entry.id === attachment.playerId && !entry.isCPU);
+    if (!player) throw new Error('再戦を希望するプレイヤーが見つかりません。');
+    room.rematchVotes ||= [];
+    if (!room.rematchVotes.includes(player.id)) room.rematchVotes.push(player.id);
+    const requiredPlayers = room.players.filter((entry) => !entry.isCPU);
+    const votes = room.rematchVotes.filter((playerId) => requiredPlayers.some((entry) => entry.id === playerId));
+    if (requiredPlayers.every((entry) => votes.includes(entry.id))) {
+      room.rematchVotes = [];
+      this.startGame(room);
+      await this.ctx.storage.put('rooms', rooms);
+      await this.scheduleAlarm(rooms);
+      this.broadcastRoom(room, { type: 'room.started', roomId: room.id, players: this.publicPlayers(room), rematch: true });
+      this.broadcastState(room);
+      return;
+    }
+    await this.ctx.storage.put('rooms', rooms);
+    this.broadcastRoom(room, {
+      type: 'rematch.waiting',
+      votes: votes.length,
+      required: requiredPlayers.length,
+      playerName: player.name,
+      votedPlayerId: player.id,
+      voterIds: votes,
+    });
+  }
+
+  advanceTurn(room) {
+    let checked = 0;
+    while (checked < room.players.length) {
+      if (room.players.every((player) => player.turns >= 4)) {
+        room.status = 'complete';
+        room.turnDeadline = null;
+        room.cpuDeadline = null;
+        this.finishRoom(room);
+        return;
+      }
+      room.current = (room.current + 1) % room.players.length;
+      const nextPlayer = room.players[room.current];
+      if (nextPlayer.cards.some((slot) => !slot.revealed)) {
+        this.resetTurnDeadline(room);
+        room.cpuDeadline = nextPlayer.isCPU ? Date.now() + CPU_THINK_TIME_MS : null;
+        return;
+      }
+      nextPlayer.turns = 4;
+      checked += 1;
+    }
+    room.status = 'complete';
+    room.turnDeadline = null;
+    room.cpuDeadline = null;
+    this.finishRoom(room);
+  }
+
   async gameAction(ws, attachment, message) {
     const rooms = await this.ctx.storage.get('rooms') || {};
     const room = rooms[attachment.roomId];
@@ -264,7 +328,7 @@ export class GameHub {
     if (room.turnDeadline && room.turnDeadline <= Date.now()) {
       this.playCpuTurn(room, player, room.settings?.cpuDifficulty || 'normal');
       this.broadcastRoom(room, { type: 'turn.timeout', playerName: player.name });
-      if (room.status === 'playing' && room.players[room.current]?.isCPU) await this.runDisconnectedCpu(room);
+      if (room.status === 'playing' && room.players[room.current]?.isCPU) room.cpuDeadline = Date.now() + CPU_THINK_TIME_MS;
       await this.ctx.storage.put('rooms', rooms);
       await this.scheduleAlarm(rooms);
       this.broadcastState(room);
@@ -294,19 +358,10 @@ export class GameHub {
     }
     player.turns += 1;
     room.lastAction = { playerId: player.id, action: message.action, index };
-    if (room.players.every((entry) => entry.turns >= 4)) {
-      room.status = 'complete';
-      room.turnDeadline = null;
-      this.finishRoom(room);
-    } else {
-      room.current = (room.current + 1) % room.players.length;
-      this.resetTurnDeadline(room);
-    }
-    const cpuTookTurns = room.status === 'playing' && room.players[room.current].isCPU;
-    if (cpuTookTurns) await this.runDisconnectedCpu(room);
+    this.advanceTurn(room);
     await this.ctx.storage.put('rooms', rooms);
     await this.scheduleAlarm(rooms);
-    if (!cpuTookTurns) this.broadcastState(room);
+    this.broadcastState(room);
   }
 
   async leaveRoom(ws, attachment) {
@@ -363,13 +418,9 @@ export class GameHub {
   }
 
   async runDisconnectedCpu(room) {
-    let safety = 0;
-    while (room.status === 'playing' && room.players[room.current].isCPU && safety < 16) {
-      safety += 1;
-      const player = room.players[room.current];
-      this.playCpuTurn(room, player, room.settings?.cpuDifficulty || 'normal');
+    if (room.status === 'playing' && room.players[room.current]?.isCPU && !room.cpuDeadline) {
+      room.cpuDeadline = Date.now() + CPU_THINK_TIME_MS;
     }
-    this.broadcastState(room);
   }
 
   playCpuTurn(room, player, difficulty) {
@@ -428,14 +479,7 @@ export class GameHub {
     }
     player.turns += 1;
     room.lastAction = { playerId: player.id, action, index, automatic: true };
-    if (room.players.every((entry) => entry.turns >= 4)) {
-      room.status = 'complete';
-      room.turnDeadline = null;
-      this.finishRoom(room);
-    } else {
-      room.current = (room.current + 1) % room.players.length;
-      this.resetTurnDeadline(room);
-    }
+    this.advanceTurn(room);
   }
 
   newRoom(players, roomId = this.randomRoomCode(5)) {
@@ -451,9 +495,15 @@ export class GameHub {
     });
     room.discard = room.deck.pop();
     room.waste = [];
-    room.current = 0;
+    this.shuffle(room.players);
+    room.current = crypto.getRandomValues(new Uint32Array(1))[0] % room.players.length;
     room.status = 'playing';
     room.startedAt = Date.now();
+    room.gameId = crypto.randomUUID();
+    room.lastAction = null;
+    room.rematchVotes = [];
+    room.completedAt = null;
+    room.cpuDeadline = room.players[room.current].isCPU ? room.startedAt + CPU_THINK_TIME_MS : null;
     this.resetTurnDeadline(room);
   }
 
@@ -527,7 +577,9 @@ export class GameHub {
     const player = room.players.find((entry) => entry.id === playerId);
     return {
       roomId: room.id,
+      gameId: room.gameId,
       status: room.status,
+      rematchVotes: room.rematchVotes || [],
       players: room.players.map((entry) => ({
         id: entry.id,
         name: entry.name,

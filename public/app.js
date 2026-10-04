@@ -185,6 +185,8 @@ function startGame() {
     turns: 0,
     score: null,
   }));
+  const cpuPlayers = shuffle(players.slice(1));
+  players.splice(1, cpuPlayers.length, ...cpuPlayers);
   const deck = shuffle(createDeck());
   for (const player of players) player.cards = Array.from({ length: 4 }, () => ({ card: deck.pop(), revealed: false }));
   const discard = deck.pop();
@@ -195,7 +197,7 @@ function startGame() {
     deck,
     discard,
     waste: [],
-    current: 0,
+    current: Math.floor(Math.random() * players.length),
     difficulty: difficultyInput.value,
     complete: false,
     startedAt: Date.now(),
@@ -222,21 +224,46 @@ function createCardFlight(source) {
 }
 
 function createCardFlightFrom(sourceCard) {
+  return createCardOverlay(sourceCard, 'card-flight', (rotation) => `rotate(${rotation}deg)`);
+}
+
+function createCardFlipFrom(sourceCard) {
+  return createCardOverlay(sourceCard, 'card-flip-overlay', (rotation) => `rotate(${rotation}deg) rotateY(0deg)`);
+}
+
+function createCardOverlay(sourceCard, className, getTransform) {
   if (!sourceCard || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null;
   const bounds = sourceCard.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return null;
-  const flight = sourceCard.cloneNode(true);
-  flight.classList.add('card-flight');
+  const width = sourceCard.offsetWidth;
+  const height = sourceCard.offsetHeight;
+  const rotation = sourceCard.closest('.seat-left') ? -90 : sourceCard.closest('.seat-right') ? 90 : 0;
+  const isFlip = className === 'card-flip-overlay';
+  const flight = isFlip ? document.createElement('div') : sourceCard.cloneNode(true);
+  if (isFlip) {
+    flight.className = 'playing-card card-back';
+  } else {
+    const sourceElements = [sourceCard, ...sourceCard.querySelectorAll('*')];
+    const flightElements = [flight, ...flight.querySelectorAll('*')];
+    sourceElements.forEach((element, index) => {
+      const computedStyle = getComputedStyle(element);
+      for (const property of computedStyle) {
+        flightElements[index].style.setProperty(property, computedStyle.getPropertyValue(property));
+      }
+    });
+  }
+  flight.classList.add(className);
   flight.removeAttribute('id');
   flight.setAttribute('aria-hidden', 'true');
   flight.style.position = 'fixed';
-  flight.style.left = `${bounds.left}px`;
-  flight.style.top = `${bounds.top}px`;
-  flight.style.width = `${bounds.width}px`;
-  flight.style.height = `${bounds.height}px`;
+  flight.style.left = `${bounds.left + (bounds.width - width) / 2}px`;
+  flight.style.top = `${bounds.top + (bounds.height - height) / 2}px`;
+  flight.style.width = `${width}px`;
+  flight.style.height = `${height}px`;
   flight.style.margin = '0';
-  flight.style.transform = 'none';
+  flight.style.transform = getTransform(rotation);
   flight.style.transformOrigin = 'center';
+  flight.dataset.startRotation = String(rotation);
   flight.style.zIndex = '1200';
   flight.style.pointerEvents = 'none';
   if (flight instanceof HTMLButtonElement) flight.disabled = true;
@@ -244,7 +271,32 @@ function createCardFlightFrom(sourceCard) {
   return flight;
 }
 
-function animateCardFlight(flight, target) {
+function animateCardFlip(back, target) {
+  if (!back) return;
+  if (!target?.isConnected) {
+    back.remove();
+    return;
+  }
+  const rotation = Number(back.dataset.startRotation || 0);
+  const backAnimation = back.animate([
+    { transform: `perspective(800px) rotate(${rotation}deg) rotateY(0deg)`, opacity: 1, offset: 0 },
+    { transform: `perspective(800px) rotate(${rotation}deg) rotateY(90deg)`, opacity: 1, offset: 0.48 },
+    { transform: `perspective(800px) rotate(${rotation}deg) rotateY(180deg)`, opacity: 0, offset: 1 },
+  ], { duration: 480, easing: 'ease-in-out', fill: 'forwards' });
+  const faceAnimation = target.animate([
+    { opacity: 0 },
+    { opacity: 1 },
+  ], { duration: 210, delay: 205, easing: 'ease-out', fill: 'both' });
+  const cleanup = () => {
+    back.remove();
+    faceAnimation.cancel();
+  };
+  backAnimation.addEventListener('finish', cleanup, { once: true });
+  backAnimation.addEventListener('cancel', cleanup, { once: true });
+  window.setTimeout(cleanup, 800);
+}
+
+function animateCardFlight(flight, target, flipOnArrival = false) {
   if (!flight) return;
   if (!target?.isConnected) {
     flight.remove();
@@ -258,20 +310,22 @@ function animateCardFlight(flight, target) {
   }
   const translateX = end.left + end.width / 2 - (start.left + start.width / 2);
   const translateY = end.top + end.height / 2 - (start.top + start.height / 2);
-  const scaleX = target.offsetWidth / start.width;
-  const scaleY = target.offsetHeight / start.height;
+  const scaleX = target.offsetWidth / flight.offsetWidth;
+  const scaleY = target.offsetHeight / flight.offsetHeight;
+  const startRotation = Number(flight.dataset.startRotation || 0);
   const rotation = target.closest('.seat-left') ? -90 : target.closest('.seat-right') ? 90 : 0;
   target.classList.add('is-card-arriving');
   const animation = flight.animate([
-    { transform: 'translate(0,0) scale(1) rotate(0)', opacity: 1 },
+    { transform: `translate(0,0) scale(1) rotate(${startRotation}deg)`, opacity: 1 },
     { transform: `translate(${translateX}px,${translateY}px) scale(${scaleX},${scaleY}) rotate(${rotation}deg)`, opacity: 1 },
   ], { duration: 540, easing: 'cubic-bezier(.2,.75,.3,1)', fill: 'forwards' });
-  const cleanup = () => {
+  const cleanup = (flip = false) => {
     flight.remove();
     target.classList.remove('is-card-arriving');
+    if (flip) animateCardFlip(createCardFlipFrom(target), target);
   };
-  animation.addEventListener('finish', cleanup, { once: true });
-  animation.addEventListener('cancel', cleanup, { once: true });
+  animation.addEventListener('finish', () => cleanup(flipOnArrival), { once: true });
+  animation.addEventListener('cancel', () => cleanup(), { once: true });
   window.setTimeout(cleanup, 800);
 }
 
@@ -490,7 +544,9 @@ function performAction(slotIndex) {
   }
   let cardFlight = null;
   let discardFlight = null;
+  let revealFlip = null;
   if (selectedAction === 'reveal') {
+    revealFlip = createCardFlipFrom(findCardTarget(player.id, slotIndex));
     slot.revealed = true;
     game.seen.add(slot.card.id);
     showToast(`${slot.card.rank}${slot.card.suit} を公開しました`);
@@ -517,8 +573,9 @@ function performAction(slotIndex) {
   playEffect('card');
   selectedAction = null;
   finishTurn();
-  animateCardFlight(cardFlight, findCardTarget(player.id, slotIndex));
-  animateCardFlight(discardFlight, $('#discard-pile .playing-card'));
+  animateCardFlight(cardFlight, findCardTarget(player.id, slotIndex), true);
+  animateCardFlight(discardFlight, $('#discard-pile .playing-card'), true);
+  animateCardFlip(revealFlip, findCardTarget(player.id, slotIndex));
 }
 
 function expectedScoreAfterReplacement(player, index, replacement) {
@@ -556,7 +613,9 @@ function playCpuTurn() {
   const slot = player.cards[move.index];
   let cardFlight = null;
   let discardFlight = null;
+  let revealFlip = null;
   if (move.action === 'reveal') {
+    revealFlip = createCardFlipFrom(findCardTarget(player.id, move.index));
     slot.revealed = true;
     game.seen.add(slot.card.id);
     showToast(`${player.name}がカードを開きました`);
@@ -581,14 +640,23 @@ function playCpuTurn() {
     showToast(`${player.name}が山札を交換しました`);
   }
   finishTurn();
-  animateCardFlight(cardFlight, findCardTarget(player.id, move.index));
-  animateCardFlight(discardFlight, $('#discard-pile .playing-card'));
+  animateCardFlight(cardFlight, findCardTarget(player.id, move.index), true);
+  animateCardFlight(discardFlight, $('#discard-pile .playing-card'), true);
+  animateCardFlip(revealFlip, findCardTarget(player.id, move.index));
 }
 
 function finishTurn() {
   game.players[game.current].turns += 1;
+  let checked = 0;
+  while (checked < game.players.length) {
+    if (game.players.every((player) => player.turns >= 4)) return endGame();
+    game.current = (game.current + 1) % game.players.length;
+    const nextPlayer = game.players[game.current];
+    if (nextPlayer.cards.some((slot) => !slot.revealed)) break;
+    nextPlayer.turns = 4;
+    checked += 1;
+  }
   if (game.players.every((player) => player.turns >= 4)) return endGame();
-  game.current = (game.current + 1) % game.players.length;
   selectedAction = null;
   showView('game');
   renderGame();
@@ -602,7 +670,7 @@ function scheduleCpuTurn() {
   cpuTimer = window.setTimeout(() => {
     busy = false;
     playCpuTurn();
-  }, 650);
+  }, 1000);
 }
 
 function endGame() {
@@ -1007,7 +1075,15 @@ function handleOnlineMessage(raw) {
     showToast('ルームに参加しました');
   } else if (message.type === 'room.started') {
     showOnlinePanel('choices');
-    showToast('対戦を開始します');
+    showToast(message.rematch ? '同じメンバーで再戦を開始します' : '対戦を開始します');
+  } else if (message.type === 'rematch.waiting') {
+    const rematchButton = $('#rematch-button');
+    const hasVoted = message.voterIds?.includes(data.onlineSession.playerId);
+    rematchButton.disabled = Boolean(hasVoted);
+    rematchButton.querySelector('span:first-child').textContent = hasVoted
+      ? `再戦待ち ${message.votes} / ${message.required}`
+      : `もう一度遊ぶ ${message.votes} / ${message.required}`;
+    showToast(`${message.playerName}が再戦を希望しています（${message.votes} / ${message.required}人）`);
   } else if (message.type === 'room.updated') {
     updateOnlineLobby(message.roomId, message.players, message.maxPlayers, message.hostId, message.passphrase, message.settings);
   } else if (message.type === 'turn.timeout') {
@@ -1031,6 +1107,10 @@ function handleOnlineMessage(raw) {
   } else if (message.type === 'error') {
     busy = false;
     if (game?.mode === 'online') renderGame();
+    if (game?.mode === 'online' && game.complete) {
+      $('#rematch-button').disabled = false;
+      $('#rematch-button').querySelector('span:first-child').textContent = 'もう一度遊ぶ';
+    }
     showToast(message.message || 'オンライン処理に失敗しました');
   } else if (message.type === 'connection.resume') {
     setConnectionStatus(true, '再接続しました');
@@ -1077,7 +1157,8 @@ function applyOnlineState(state) {
   if (meIndex < 0) return;
   const cardFlights = [];
   const discardFlights = [];
-  if (game?.mode === 'online' && game.id === state.roomId) {
+  const revealFlips = [];
+  if (game?.mode === 'online' && game.id === (state.gameId || state.roomId)) {
     const lastAction = state.lastAction;
     state.players.forEach((nextPlayer) => {
       const previousPlayer = game.players.find((player) => player.id === nextPlayer.id);
@@ -1085,6 +1166,11 @@ function applyOnlineState(state) {
       nextPlayer.cards.forEach((slot, slotIndex) => {
         const incomingCard = fromServerCard(slot.card);
         if (!incomingCard || incomingCard.id === previousPlayer.cards[slotIndex]?.card?.id) return;
+        if (lastAction?.playerId === nextPlayer.id && lastAction.index === slotIndex && lastAction.action === 'reveal') {
+          const flip = createCardFlipFrom(findCardTarget(nextPlayer.id, slotIndex));
+          if (flip) revealFlips.push({ flip, playerId: nextPlayer.id, slotIndex });
+          return;
+        }
         const source = game.discard?.id === incomingCard.id ? 'discard' : 'deck';
         const flight = createCardFlight(source);
         if (flight) cardFlights.push({ flight, playerId: nextPlayer.id, slotIndex });
@@ -1097,7 +1183,7 @@ function applyOnlineState(state) {
   }
   const wasComplete = game?.mode === 'online' && game.complete;
   game = {
-    id: state.roomId,
+    id: state.gameId || state.roomId,
     mode: 'online',
     players: state.players.map((player) => ({
       ...player,
@@ -1117,15 +1203,31 @@ function applyOnlineState(state) {
   busy = false;
   selectedAction = null;
   if (game.complete) {
+    updateRematchButton(state.rematchVotes || []);
     cardFlights.forEach(({ flight }) => flight.remove());
     discardFlights.forEach((flight) => flight.remove());
+    revealFlips.forEach(({ flip }) => flip.remove());
     if (!wasComplete) finishOnlineGame();
     return;
   }
+  updateRematchButton([]);
   showView('game');
   renderGame();
-  cardFlights.forEach(({ flight, playerId, slotIndex }) => animateCardFlight(flight, findCardTarget(playerId, slotIndex)));
-  discardFlights.forEach((flight) => animateCardFlight(flight, $('#discard-pile .playing-card')));
+  cardFlights.forEach(({ flight, playerId, slotIndex }) => animateCardFlight(flight, findCardTarget(playerId, slotIndex), true));
+  discardFlights.forEach((flight) => animateCardFlight(flight, $('#discard-pile .playing-card'), true));
+  revealFlips.forEach(({ flip, playerId, slotIndex }) => animateCardFlip(flip, findCardTarget(playerId, slotIndex)));
+}
+
+function updateRematchButton(voterIds) {
+  if (game?.mode !== 'online') return;
+  const rematchButton = $('#rematch-button');
+  const hasVoted = voterIds.includes(data.onlineSession.playerId);
+  rematchButton.disabled = hasVoted;
+  rematchButton.querySelector('span:first-child').textContent = hasVoted
+    ? `再戦待ち ${voterIds.length} / ${game.players.filter((player) => !player.isCPU).length}`
+    : voterIds.length
+      ? `もう一度遊ぶ ${voterIds.length} / ${game.players.filter((player) => !player.isCPU).length}`
+      : 'もう一度遊ぶ';
 }
 
 function finishOnlineGame() {
@@ -1225,9 +1327,12 @@ $('#rules-button').addEventListener('click', () => $('#rules-dialog').showModal(
 $('#quit-button').addEventListener('click', () => { if (window.confirm('このゲームを終了してホームへ戻りますか？')) returnToHome(); });
 $('#rematch-button').addEventListener('click', () => {
   if (game?.mode === 'online') {
-    onlineStartedAt = 0;
-    showView('online');
-    sendOnlineMessage({ type: 'match.quick', name: data.profile.name });
+    $('#rematch-button').disabled = true;
+    $('#rematch-button').querySelector('span:first-child').textContent = '再戦希望を送信中…';
+    if (!sendOnlineMessage({ type: 'game.rematch' })) {
+      $('#rematch-button').disabled = false;
+      $('#rematch-button').querySelector('span:first-child').textContent = 'もう一度遊ぶ';
+    }
   } else beginSetup(game?.mode || 'cpu');
 });
 $('#title-button').addEventListener('click', returnToHome);
